@@ -1,15 +1,10 @@
+import { sortableTable, scoreRatio } from './table-sort.js';
 export function createAnalysis({S,esc,icon,fmt,pct,ratio,delta,signedClass,badge,empty,kpi,heading,filterBar,time,unitName,canManage,button,footer,modal,toast,api,closeModal,route,icons,$}) {
 
 function analysisControls() {
-  return `<div class="analysis-controls"><label>排行最低已知结果<select id="analysis-min">${[1,3,5,10,20].map(n=>`<option value="${n}" ${S.analysisMin===n?'selected':''}>${n} 局</option>`).join('')}</select></label><label>表格排序<select id="analysis-sort">${[['matches','使用 / 组队次数'],['win_rate','胜率由高到低'],['win_rate_low','胜率由低到高'],['rating_delta','累计涨分']].map(([v,n])=>`<option value="${v}" ${S.analysisSort===v?'selected':''}>${n}</option>`).join('')}</select></label><span class="hint">低于门槛仍展示，不参与最佳 / 最差排行。</span></div>`;
+  return `<div class="analysis-controls"><label>排行最低已知结果<select id="analysis-min">${[1,3,5,10,20].map(n=>`<option value="${n}" ${S.analysisMin===n?'selected':''}>${n} 局</option>`).join('')}</select></label><span class="hint">点击表格列名切换升序 / 降序。低于门槛仍展示，不参与最佳 / 最差排行。</span></div>`;
 }
-function analysisSort(rows) {
-  return [...rows].sort((a,b)=>{
-    if(['win_rate','win_rate_low'].includes(S.analysisSort))return Number(b.decided>=S.analysisMin)-Number(a.decided>=S.analysisMin)||(S.analysisSort==='win_rate_low'?(a.win_rate??2)-(b.win_rate??2):(b.win_rate??-1)-(a.win_rate??-1))||b.matches-a.matches;
-    if(S.analysisSort==='rating_delta')return (b.rating_delta??-Infinity)-(a.rating_delta??-Infinity)||b.matches-a.matches;
-    return b.matches-a.matches||b.decided-a.decided;
-  });
-}
+function analysisTableId(name) {return (S.route==='friend'?'friend':'overall')+'-'+name;}
 function sampleTag(r) {return r.decided<S.analysisMin?badge('样本少','muted'):'';}
 function resultCell(r) {return `<div class="win-cell"><span class="mono ${r.decided>=S.analysisMin?'positive':''}">${pct(r.wins,r.decided)}</span><div class="track"><span style="width:${r.decided?100*r.wins/r.decided:0}%"></span></div></div><div class="table-sub">${r.wins} 胜 / ${r.losses_count} 负${r.unknown?` / ${r.unknown} 未知`:''}</div>`;}
 function analysisNotice() {return `<div class="notice section-space">${icon('info')}仅计算当前筛选下的合格开黑局。胜率分母只含结果已知的场次；多账号合并到朋友，同局分处两队时该朋友胜负记为未知。总体胜率按朋友参战人次计算，朋友分处两边时双方都会计入。</div>`;}
@@ -18,16 +13,39 @@ function deckNotice(data) {
 }
 function performanceTable(rows,type='deck') {
   if(!rows.length)return empty('暂无可分析记录','调整筛选范围，或等待战绩归档。','','chart-no-axes-combined',true);
-  return `<div class="table-wrap"><table class="analysis-table"><thead><tr><th>${type==='deck'?'专精组合':'地图'}</th><th class="numeric">参战人次 / 对局</th><th>胜率 · 胜负</th><th class="numeric">累计评分变化</th><th class="numeric">场均摧毁 / 损失</th><th class="numeric">交换比</th><th class="numeric">场均占点</th><th>样本</th></tr></thead><tbody>${analysisSort(rows).map(r=>`<tr><td class="table-title">${type==='map'?`<button class="text-button" data-action="analysis-map" data-value="${esc(r.map_id)}">${esc(r.name)}</button>`:`${r.country?`<span class="faint">${esc(r.country)} · </span>`:''}${esc(r.name)}`}${type==='deck'?`<div class="table-sub">${r.key==='unknown'?'在单场详情中确认组合':`${fmt(r.inferred)} 推定 / ${fmt(r.confirmed)} 已确认或源数据`}</div>`:''}</td><td class="numeric mono">${fmt(r.matches)} / ${fmt(r.unique_matches)}</td><td>${resultCell(r)}</td><td class="numeric mono ${signedClass(r.rating_delta)}">${delta(r.rating_delta)}</td><td class="numeric mono">${fmt(r.avg_destruction,1)} / ${fmt(r.avg_losses,1)}</td><td class="numeric mono">${ratio(r.destruction,r.losses)}</td><td class="numeric mono">${fmt(r.avg_objectives,2)}</td><td>${sampleTag(r)}</td></tr>`).join('')}</tbody></table></div>`;
+  return sortableTable(analysisTableId(type==='deck'?'decks':'maps'),`<div class="table-wrap"><table class="analysis-table"><thead><tr><th>${type==='deck'?'专精组合':'地图'}</th><th class="numeric">参战人次</th><th class="numeric">对局数</th><th>胜率 · 胜负</th><th class="numeric">累计评分变化</th><th class="numeric">场均摧毁</th><th class="numeric">场均损失</th><th class="numeric">交换比</th><th class="numeric">场均占点</th><th>样本</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="table-title">${type==='map'?`<button class="text-button" data-action="analysis-map" data-value="${esc(r.map_id)}">${esc(r.name)}</button>`:`${r.country?`<span class="faint">${esc(r.country)} · </span>`:''}${esc(r.name)}`}${type==='deck'?`<div class="table-sub">${r.key==='unknown'?'在单场详情中确认组合':`${fmt(r.inferred)} 推定 / ${fmt(r.confirmed)} 已确认或源数据`}</div>`:''}</td><td class="numeric mono">${fmt(r.matches)}</td><td class="numeric mono">${fmt(r.unique_matches)}</td><td>${resultCell(r)}</td><td class="numeric mono ${signedClass(r.rating_delta)}">${delta(r.rating_delta)}</td><td class="numeric mono">${fmt(r.avg_destruction,1)}</td><td class="numeric mono">${fmt(r.avg_losses,1)}</td><td class="numeric mono">${ratio(r.destruction,r.losses)}</td><td class="numeric mono">${fmt(r.avg_objectives,2)}</td><td>${sampleTag(r)}</td></tr>`).join('')}</tbody></table></div>`,rows,[
+{index:0,key:'name',label:type==='deck'?'专精组合':'地图',type:'text',value:r=>r.name},
+{index:1,key:'matches',label:'参战人次',value:r=>r.matches},
+{index:2,key:'unique_matches',label:'对局数',value:r=>r.unique_matches},
+{index:3,key:'win_rate',label:'胜率',value:r=>r.win_rate},
+{index:4,key:'rating_delta',label:'累计评分变化',value:r=>r.rating_delta},
+{index:5,key:'destruction',label:'场均摧毁',value:r=>r.avg_destruction},
+{index:6,key:'losses',label:'场均损失',value:r=>r.avg_losses,first:'asc'},
+{index:7,key:'exchange',label:'交换比',value:r=>scoreRatio(r.destruction,r.losses)},
+{index:8,key:'objectives',label:'场均占点',value:r=>r.avg_objectives}]);
 }
 function deckMapTable(rows) {
   if(!rows.length)return empty('暂无组合与地图交叉样本','识别专精组合后，这里会列出它在不同地图的表现。','','map',true);
-  return `<div class="table-wrap"><table><thead><tr><th>专精组合</th><th>地图</th><th class="numeric">参战人次</th><th>胜率 · 胜负</th><th class="numeric">累计评分变化</th><th>样本</th></tr></thead><tbody>${analysisSort(rows).map(r=>`<tr><td class="table-title">${esc(r.deck)}</td><td>${esc(r.map)}</td><td class="numeric mono">${r.matches}</td><td>${resultCell(r)}</td><td class="numeric mono ${signedClass(r.rating_delta)}">${delta(r.rating_delta)}</td><td>${sampleTag(r)}</td></tr>`).join('')}</tbody></table></div>`;
+  return sortableTable(analysisTableId('deck-maps'),`<div class="table-wrap"><table><thead><tr><th>专精组合</th><th>地图</th><th class="numeric">参战人次</th><th>胜率 · 胜负</th><th class="numeric">累计评分变化</th><th>样本</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="table-title">${esc(r.deck)}</td><td>${esc(r.map)}</td><td class="numeric mono">${r.matches}</td><td>${resultCell(r)}</td><td class="numeric mono ${signedClass(r.rating_delta)}">${delta(r.rating_delta)}</td><td>${sampleTag(r)}</td></tr>`).join('')}</tbody></table></div>`,rows,[
+{index:0,key:'deck',label:'专精组合',type:'text',value:r=>r.deck},
+{index:1,key:'map',label:'地图',type:'text',value:r=>r.map},
+{index:2,key:'matches',label:'参战人次',value:r=>r.matches},
+{index:3,key:'win_rate',label:'胜率',value:r=>r.win_rate},
+{index:4,key:'rating_delta',label:'累计评分变化',value:r=>r.rating_delta}]);
 }
 function preferenceUnits(units) {
   if(!units.length)return empty('暂无完整单位记录','比赛补齐详情后会自动统计常用单位。','','crosshair',true);
-  const sorted=[...units].sort((a,b)=>S.unitSort==='instances'?b.instances-a.instances||b.matches-a.matches:S.unitSort==='damage'?b.damage-a.damage||b.matches-a.matches:b.matches-a.matches||b.instances-a.instances);
-  return `<div class="section-heading"><h2>常用单位</h2><label class="unit-sort-label">排序<select id="unit-preference-sort">${[['usage','出场局数'],['instances','出场次数'],['damage','总伤害']].map(([v,n])=>`<option value="${v}" ${S.unitSort===v?'selected':''}>${n}</option>`).join('')}</select></label></div><div class="table-wrap"><table><thead><tr><th>单位</th><th class="numeric">出场人次</th><th class="numeric">使用率</th><th class="numeric">出场次数</th><th>使用时胜率</th><th class="numeric">击杀 / 阵亡</th><th class="numeric">伤害 / 单次均伤</th><th class="numeric">退款次数</th></tr></thead><tbody>${sorted.map(u=>`<tr><td class="table-title">${esc(unitName(u.catalogue,u.unit_id))}<div class="table-sub">#${esc(u.unit_id)}</div></td><td class="numeric mono">${fmt(u.matches)}</td><td class="numeric mono">${fmt(100*u.usage_rate,1)}%</td><td class="numeric mono">${fmt(u.instances)}</td><td>${resultCell(u)}${sampleTag(u)}</td><td class="numeric mono">${fmt(u.kills)} / ${fmt(u.deaths)}</td><td class="numeric mono">${fmt(u.damage,1)} / ${fmt(u.damage/u.instances,1)}</td><td class="numeric mono">${fmt(u.refunded)}</td></tr>`).join('')}</tbody></table></div><p class="hint section-space">“最爱单位”按出场局数排序，同局同一朋友多个账号合并。使用率只以详情完整的参战人次为分母；使用时胜率表示该朋友在使用该单位的对局中的胜率，不代表单位本身的胜率或因果效果。</p>`;
+  return sortableTable(analysisTableId('units'),`<div class="section-heading"><h2>常用单位</h2></div><div class="table-wrap"><table><thead><tr><th>单位</th><th class="numeric">出场人次</th><th class="numeric">使用率</th><th class="numeric">出场次数</th><th>使用时胜率</th><th class="numeric">击杀</th><th class="numeric">阵亡</th><th class="numeric">伤害</th><th class="numeric">单次均伤</th><th class="numeric">退款次数</th></tr></thead><tbody>${units.map(u=>`<tr><td class="table-title">${esc(unitName(u.catalogue,u.unit_id))}<div class="table-sub">#${esc(u.unit_id)}</div></td><td class="numeric mono">${fmt(u.matches)}</td><td class="numeric mono">${fmt(100*u.usage_rate,1)}%</td><td class="numeric mono">${fmt(u.instances)}</td><td>${resultCell(u)}${sampleTag(u)}</td><td class="numeric mono">${fmt(u.kills)}</td><td class="numeric mono">${fmt(u.deaths)}</td><td class="numeric mono">${fmt(u.damage,1)}</td><td class="numeric mono">${fmt(u.damage/u.instances,1)}</td><td class="numeric mono">${fmt(u.refunded)}</td></tr>`).join('')}</tbody></table></div><p class="hint section-space">“最爱单位”按出场局数排序，同局同一朋友多个账号合并。使用率只以详情完整的参战人次为分母；使用时胜率表示该朋友在使用该单位的对局中的胜率，不代表单位本身的胜率或因果效果。</p>`,units,[
+{index:0,key:'name',label:'单位',type:'text',value:r=>unitName(r.catalogue,r.unit_id)},
+{index:1,key:'matches',label:'出场人次',value:r=>r.matches},
+{index:2,key:'usage',label:'使用率',value:r=>r.usage_rate},
+{index:3,key:'instances',label:'出场次数',value:r=>r.instances},
+{index:4,key:'win_rate',label:'使用时胜率',value:r=>r.win_rate},
+{index:5,key:'kills',label:'击杀',value:r=>r.kills},
+{index:6,key:'deaths',label:'阵亡',value:r=>r.deaths,first:'asc'},
+{index:7,key:'damage',label:'伤害',value:r=>r.damage},
+{index:8,key:'average_damage',label:'单次均伤',value:r=>r.instances?r.damage/r.instances:null},
+{index:9,key:'refunded',label:'退款次数',value:r=>r.refunded}]);
 }
 function insightCard(title,value,detail,ico='users',tone='') {return `<article class="insight-card"><div class="insight-label">${icon(ico)}${esc(title)}</div><div class="insight-value ${tone}">${value}</div><p>${esc(detail)}</p></article>`;}
 function friendLink(row) {return `<a href="#friend/${row.member_id}" class="yellow">${esc(row.name)}</a>`;}
@@ -38,7 +56,16 @@ function friendInsights(data) {
 function teammateAnalysis(data) {
   const rows=data.teammates.rows;
   if(!rows.length)return empty('暂无共同开黑记录','','','handshake',true);
-  return `<div class="table-wrap"><table><thead><tr><th>朋友</th><th class="numeric">同局</th><th class="numeric">同队</th><th>同队胜率</th><th class="numeric">与个人总胜率差</th><th class="numeric">我的累计涨分</th><th class="numeric">对位场次</th><th>对位时我的胜率</th><th>样本</th></tr></thead><tbody>${analysisSort(rows.map(r=>({...r.same,...r,key:r.key,matches:r.same.matches,win_rate:r.same.win_rate,decided:r.same.decided}))).map(r=>`<tr><td class="table-title">${friendLink(r)}${r.unclassified?`<div class="table-sub">${r.unclassified} 局队伍关系不明确</div>`:''}</td><td class="numeric mono">${r.together}</td><td class="numeric mono">${r.same.matches}</td><td>${resultCell(r.same)}</td><td class="numeric mono">${r.same.win_rate!==null&&data.overview.win_rate!==null?`${delta(100*(r.same.win_rate-data.overview.win_rate))} <span class="faint">百分点</span>`:'—'}</td><td class="numeric mono ${signedClass(r.same.rating_delta)}">${delta(r.same.rating_delta)}</td><td class="numeric mono">${r.opposed.matches}</td><td>${resultCell(r.opposed)}</td><td>${sampleTag(r.same)}</td></tr>`).join('')}</tbody></table></div><p class="hint section-space">同局不等于同队；最佳 / 最差搭档只按同队已知结果计算，并应用最低样本门槛。胜率差只是关联对照，也会受到地图、模式和其他队友的影响。</p>`;
+  return sortableTable(analysisTableId('teammates'),`<div class="table-wrap"><table><thead><tr><th>朋友</th><th class="numeric">同局</th><th class="numeric">同队</th><th>同队胜率</th><th class="numeric">与个人总胜率差</th><th class="numeric">我的累计涨分</th><th class="numeric">对位场次</th><th>对位时我的胜率</th><th>已知结果</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="table-title">${friendLink(r)}${r.unclassified?`<div class="table-sub">${r.unclassified} 局队伍关系不明确</div>`:''}</td><td class="numeric mono">${r.together}</td><td class="numeric mono">${r.same.matches}</td><td>${resultCell(r.same)}</td><td class="numeric mono">${r.same.win_rate!==null&&data.overview.win_rate!==null?`${delta(100*(r.same.win_rate-data.overview.win_rate))} <span class="faint">百分点</span>`:'—'}</td><td class="numeric mono ${signedClass(r.same.rating_delta)}">${delta(r.same.rating_delta)}</td><td class="numeric mono">${r.opposed.matches}</td><td>${resultCell(r.opposed)}</td><td class="mono">${fmt(r.same.decided)} 局 ${sampleTag(r.same)}</td></tr>`).join('')}</tbody></table></div><p class="hint section-space">同局不等于同队；最佳 / 最差搭档只按同队已知结果计算，并应用最低样本门槛。胜率差只是关联对照，也会受到地图、模式和其他队友的影响。</p>`,rows,[
+{index:0,key:'name',label:'朋友',type:'text',value:r=>r.name},
+{index:1,key:'together',label:'同局',value:r=>r.together},
+{index:2,key:'matches',label:'同队',value:r=>r.same.matches},
+{index:3,key:'win_rate',label:'同队胜率',value:r=>r.same.win_rate},
+{index:4,key:'win_delta',label:'与个人总胜率差',value:r=>r.same.win_rate!==null&&data.overview.win_rate!==null?r.same.win_rate-data.overview.win_rate:null},
+{index:5,key:'rating_delta',label:'我的累计涨分',value:r=>r.same.rating_delta},
+{index:6,key:'opposed_matches',label:'对位场次',value:r=>r.opposed.matches},
+{index:7,key:'opposed_win_rate',label:'对位时我的胜率',value:r=>r.opposed.win_rate},
+{index:8,key:'decided',label:'已知结果',value:r=>r.same.decided}]);
 }
 function friendTrend(data) {
   const t=data.trend;
@@ -79,7 +106,7 @@ document.addEventListener('click',async event=>{
   }catch(error){toast(error.message,true);}finally{if(el.isConnected)el.disabled=false;}
 });
 document.addEventListener('change',async event=>{
-  const el=event.target;if(!['analysis-min','analysis-sort','unit-preference-sort','friend-switch','deck-spec1'].includes(el.id))return;
+  const el=event.target;if(!['analysis-min','friend-switch','deck-spec1'].includes(el.id))return;
   event.stopImmediatePropagation();
   try {
     if(el.id==='friend-switch'){location.hash=`friend/${el.value}`;return;}
@@ -87,9 +114,7 @@ document.addEventListener('change',async event=>{
       const specs=S.currentMatch.specializations;const first=specs.find(s=>s.id===Number(el.value));const second=$('#deck-spec2');const previous=second.value;
       second.innerHTML='<option value="">请选择专精</option>'+specs.filter(s=>s.countryId===first?.countryId&&s.id!==first?.id).map(s=>`<option value="${s.id}" ${String(s.id)===previous?'selected':''}>${esc(s.display_name)}</option>`).join('');return;
     }
-    if(el.id==='analysis-min')S.analysisMin=Number(el.value);
-    else if(el.id==='analysis-sort')S.analysisSort=el.value;
-    else S.unitSort=el.value;
+    S.analysisMin=Number(el.value);
     await route();
   }catch(error){toast(error.message,true);}
 });

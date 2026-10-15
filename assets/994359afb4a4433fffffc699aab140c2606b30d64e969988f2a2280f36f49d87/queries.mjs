@@ -55,7 +55,7 @@ export function dashboard(store, params) {
   const combos = store.all(`WITH mt AS (SELECT DISTINCT r.match_id,r.member_id,r.member_name,r.team_id,r.won FROM registered_participants r JOIN matches m ON m.id=r.match_id WHERE ${f.sql} AND r.team_id IS NOT NULL), pairs AS (
     SELECT a.match_id,a.member_id AS a,b.member_id AS b,MIN(a.member_name) AS name_a,MIN(b.member_name) AS name_b,CASE WHEN COUNT(DISTINCT a.won)=1 THEN MIN(a.won) END AS won
     FROM mt a JOIN mt b ON a.match_id=b.match_id AND a.team_id=b.team_id AND a.member_id<b.member_id GROUP BY a.match_id,a.member_id,b.member_id)
-    SELECT a,b,name_a,name_b,COUNT(*) AS matches,SUM(won=1) AS wins,COUNT(won) AS decided FROM pairs GROUP BY a,b ORDER BY matches DESC LIMIT 20`, ...f.args);
+    SELECT a,b,name_a,name_b,COUNT(*) AS matches,SUM(won=1) AS wins,COUNT(won) AS decided FROM pairs GROUP BY a,b ORDER BY matches DESC`, ...f.args);
   return { overview: { ...overview, active_members: active, candidates }, daily, maps, members, combos };
 }
 
