@@ -1,5 +1,6 @@
 import { filters, memberStats } from './queries.mjs';
 import { mapName } from './domain.mjs';
+import { zhanfanAnalysis } from './zhanfan.mjs';
 
 export function deckModel(store) {
   const row=store.get("SELECT data_json FROM analysis_catalogue WHERE key='deck_model'");
@@ -128,7 +129,9 @@ export function friendAnalysis(store,id,params=new URLSearchParams()) {
   const model=deckModel(store),min=minimum(params),all=records(store,scoped,model),rows=all.filter(r=>r.member_id===member.id);
   const base=summarize(rows,min);
   const teammates=relationships(all,member.id,min),units=unitPreferences(store,scoped,rows,member.id);
+  const court=zhanfanAnalysis(store,scoped);
   return {...base,member,min_games:min,teammates,units,trend:trend(rows),stats:memberStats(store,scoped).find(m=>m.member_id===member.id)??null,
+    court:{model:court.model,min_games:court.min_games,report:court.members.find(r=>r.member_id===member.id)??null},
     recent_matches:rows.slice(-20).reverse().map(r=>({id:r.match_id,end_time:r.end_time,map:mapName(r.map_id),won:r.won,rating_delta:r.rating_delta,deck:r.deck,destruction:r.destruction,losses:r.losses,accounts:r.accounts})),
     model:{updated_at:model.updated_at??null,db_file:model.db_file??null}};
 }

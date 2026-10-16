@@ -1,5 +1,6 @@
 import { dashboard, listMatches, unitStats, memberStats, supplyAnalysis } from './queries.mjs';
 import { overallAnalysis, friendAnalysis, deckModel, identifyDeck, specName } from './analysis.mjs';
+import { zhanfanAnalysis } from './zhanfan.mjs';
 
 export function createReader(base, { fetcher = fetch, sqlite = window.initSqlJs } = {}) {
   let snapshot = null;
@@ -49,14 +50,15 @@ export function createReader(base, { fetcher = fetch, sqlite = window.initSqlJs 
       await ready();
       const url = new URL(route, 'https://court.invalid');
       const path = url.pathname;
-      if (path === '/api/session') return { user: { name: '公开只读', role: 'viewer', member_id: 0 }, setup_required: false };
+      if (path === '/api/session') return { user: { name: '公开只读', role: 'viewer', member_id: 0 }, setup_required: false, ui: { court_mode: snapshot.ui?.court_mode === true } };
       if (path === '/api/members') return { members: snapshot.members };
       if (path === '/api/maps') return { maps: snapshot.maps, modes: snapshot.modes };
-      if (path === '/api/sync/status') return { active: null, settings: { sync_enabled: false }, snapshot };
+      if (path === '/api/sync/status') return { active: null, settings: { sync_enabled: false, court_mode: snapshot.ui?.court_mode === true }, snapshot };
       if (path === '/api/dashboard') return dashboard(store, url.searchParams);
       if (path === '/api/matches') return listMatches(store, url.searchParams);
       if (path === '/api/analytics/members') return { members: memberStats(store, url.searchParams) };
       if (path === '/api/analytics/supply') return supplyAnalysis(store, url.searchParams);
+      if (path === '/api/analytics/zhanfan') return zhanfanAnalysis(store, url.searchParams);
       if (path === '/api/analytics/units') return { units: unitStats(store, url.searchParams) };
       if (path === '/api/analytics/overview') return overallAnalysis(store,url.searchParams);
       const friend=path.match(/^\/api\/members\/(\d+)\/analysis$/);
