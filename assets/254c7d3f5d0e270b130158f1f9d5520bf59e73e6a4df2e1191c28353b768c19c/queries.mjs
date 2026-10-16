@@ -1,5 +1,18 @@
 import { mapName } from './domain.mjs';
 
+// Complete protobuf detail omits zero-valued scalars; missing detail is not zero.
+const DETAIL_METRICS = {
+  damage: 'DamageDealt', damage_received: 'DamageReceived', friendly_fire: 'DamageFriendlyFireDealt',
+  supplied_allies: 'SupplyPointsConsumedByAllies', received_allies: 'SupplyPointsConsumedFromAllies', supply_consumed: 'SupplyPointsConsumed',
+  spawned_score: 'TotalSpawnedUnitScore', refunded_score: 'TotalRefundedUnitScore', kills: 'Destruction', units_lost: 'Losses',
+  experience: 'TotalExp', raw_experience: 'RawExp',
+};
+
+export function minimumGames(params, key, fallback = 5) {
+  const n = Number(params.get(key));
+  return Number.isInteger(n) && n >= 1 && n <= 10000 ? n : fallback;
+}
+
 export function filters(params, { candidates = false } = {}) {
   const conditions = [candidates && params.get('scope') === 'all' ? '1=1' : 'm.friend_count>=3'];
   const args = [];
@@ -28,9 +41,7 @@ export function memberStats(store, params = new URLSearchParams()) {
     SUM(CASE WHEN json_type(m.raw_json,'$.Data')='object' THEN COALESCE(r.losses,0) ELSE r.losses END) AS losses,
     SUM(r.rating_delta) AS rating_delta,SUM(r.objectives) AS objectives,
     CASE WHEN COUNT(DISTINCT r.won)=1 THEN MIN(r.won) END AS won,
-    SUM(CASE WHEN m.detail_state='complete' THEN COALESCE(json_extract(r.raw_json,'$.DamageDealt'),0) END) AS damage,
-    SUM(CASE WHEN m.detail_state='complete' THEN COALESCE(json_extract(r.raw_json,'$.DamageFriendlyFireDealt'),0) END) AS friendly_fire,
-    SUM(CASE WHEN m.detail_state='complete' THEN COALESCE(json_extract(r.raw_json,'$.SupplyPointsConsumedByAllies'),0) END) AS supplied_allies,
+    ${Object.entries(DETAIL_METRICS).map(([name, field]) => `SUM(CASE WHEN m.detail_state='complete' THEN COALESCE(json_extract(r.raw_json,'$.${field}'),0) END) AS ${name}`).join(',\n    ')},
     MAX(m.duration) AS duration
     FROM registered_participants r JOIN matches m ON m.id=r.match_id WHERE ${f.sql} GROUP BY r.member_id,r.match_id)
     SELECT member_id,name,COUNT(*) AS matches,SUM(won=1) AS wins,SUM(won=0) AS losses_count,COUNT(won) AS decided,
@@ -38,14 +49,14 @@ export function memberStats(store, params = new URLSearchParams()) {
     AVG(destruction) AS avg_destruction,COUNT(destruction) AS destruction_matches,
     AVG(losses) AS avg_losses,COUNT(losses) AS losses_matches,
     AVG(objectives) AS avg_objectives,COUNT(objectives) AS objectives_matches,
-    AVG(friendly_fire) AS avg_friendly_fire,COUNT(friendly_fire) AS friendly_fire_matches,
-    AVG(damage) AS avg_damage,AVG(supplied_allies) AS avg_supplied_allies,
-    SUM(damage) AS damage,SUM(friendly_fire) AS friendly_fire,SUM(supplied_allies) AS supplied_allies,SUM(duration) AS duration
+    COUNT(friendly_fire) AS friendly_fire_matches,COUNT(damage) AS detail_matches,COUNT(supply_consumed) AS supply_matches,
+    ${Object.keys(DETAIL_METRICS).map(name => `AVG(${name}) AS avg_${name},SUM(${name}) AS ${name}`).join(',\n    ')},SUM(duration) AS duration
     FROM per_match GROUP BY member_id ORDER BY matches DESC,avg_destruction DESC`, ...f.args);
 }
 
 export function dashboard(store, params) {
   const f = filters(params);
+  const comboMin = minimumGames(params, 'combo_min_games');
   const overview = store.get(`SELECT COUNT(*) AS matches,COALESCE(SUM(m.duration),0) AS duration,COALESCE(SUM(m.detail_state='complete'),0) AS complete,MIN(m.end_time) AS earliest,MAX(m.end_time) AS latest FROM matches m WHERE ${f.sql}`, ...f.args);
   const active = store.get('SELECT COUNT(*) AS count FROM members WHERE active=1').count;
   const candidates = store.get('SELECT COUNT(*) AS count FROM matches').count;
@@ -55,8 +66,23 @@ export function dashboard(store, params) {
   const combos = store.all(`WITH mt AS (SELECT DISTINCT r.match_id,r.member_id,r.member_name,r.team_id,r.won FROM registered_participants r JOIN matches m ON m.id=r.match_id WHERE ${f.sql} AND r.team_id IS NOT NULL), pairs AS (
     SELECT a.match_id,a.member_id AS a,b.member_id AS b,MIN(a.member_name) AS name_a,MIN(b.member_name) AS name_b,CASE WHEN COUNT(DISTINCT a.won)=1 THEN MIN(a.won) END AS won
     FROM mt a JOIN mt b ON a.match_id=b.match_id AND a.team_id=b.team_id AND a.member_id<b.member_id GROUP BY a.match_id,a.member_id,b.member_id)
-    SELECT a,b,name_a,name_b,COUNT(*) AS matches,SUM(won=1) AS wins,COUNT(won) AS decided FROM pairs GROUP BY a,b ORDER BY matches DESC`, ...f.args);
-  return { overview: { ...overview, active_members: active, candidates }, daily, maps, members, combos };
+    SELECT a,b,name_a,name_b,COUNT(*) AS matches,SUM(won=1) AS wins,COUNT(won) AS decided FROM pairs GROUP BY a,b HAVING COUNT(*)>=? ORDER BY matches DESC,a,b`, ...f.args, comboMin);
+  return { overview: { ...overview, active_members: active, candidates }, daily, maps, members, combos, combo_min_games: comboMin };
+}
+
+export function supplyAnalysis(store, params = new URLSearchParams()) {
+  const min = minimumGames(params, 'supply_min_games');
+  const members = memberStats(store, params);
+  const eligible = members.filter(m => m.supply_matches >= min);
+  function ranking(key) {
+    let last = null, place = 0;
+    return [...eligible].sort((a,b) => b[key]-a[key] || b.supply_matches-a.supply_matches || a.member_id-b.member_id).map((row,i) => {
+      if (last === null || row[key] !== last) place = i+1;
+      last = row[key];
+      return { ...row, rank: place };
+    });
+  }
+  return { min_games: min, members, eligible: eligible.length, hungry: ranking('avg_received_allies'), transport: ranking('avg_supplied_allies') };
 }
 
 export function listMatches(store, params, candidates = false) {

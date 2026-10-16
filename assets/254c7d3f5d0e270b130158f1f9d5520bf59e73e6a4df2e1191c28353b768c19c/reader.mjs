@@ -1,4 +1,4 @@
-import { dashboard, listMatches, unitStats, memberStats } from './queries.mjs';
+import { dashboard, listMatches, unitStats, memberStats, supplyAnalysis } from './queries.mjs';
 import { overallAnalysis, friendAnalysis, deckModel, identifyDeck, specName } from './analysis.mjs';
 
 export function createReader(base, { fetcher = fetch, sqlite = window.initSqlJs } = {}) {
@@ -56,6 +56,7 @@ export function createReader(base, { fetcher = fetch, sqlite = window.initSqlJs 
       if (path === '/api/dashboard') return dashboard(store, url.searchParams);
       if (path === '/api/matches') return listMatches(store, url.searchParams);
       if (path === '/api/analytics/members') return { members: memberStats(store, url.searchParams) };
+      if (path === '/api/analytics/supply') return supplyAnalysis(store, url.searchParams);
       if (path === '/api/analytics/units') return { units: unitStats(store, url.searchParams) };
       if (path === '/api/analytics/overview') return overallAnalysis(store,url.searchParams);
       const friend=path.match(/^\/api\/members\/(\d+)\/analysis$/);
