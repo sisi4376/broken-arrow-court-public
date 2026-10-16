@@ -132,7 +132,7 @@ const PHASES={accounts:'读取账号',recent:'同步近期对局',backfill:'回�
 const RUN_STATES={running:'进行中',complete:'完成',partial:'部分完成',failed:'失败',paused:'已暂停',interrupted:'重启后待续'};
 function courtSessionBanner(){
   if(!isCourtMode())return '';
-  return '<div class="court-session" aria-label="正在开庭"><div class="court-session-mark" aria-hidden="true">'+icon('scale')+'</div><div class="court-session-copy"><span class="court-session-kicker">BROKEN ARROW · COURT IN SESSION</span><strong>现在开庭</strong><p>以卷宗为据，凭数据说话。</p></div><div class="court-session-seal" aria-hidden="true">蘸饭<br>法庭</div><span class="court-session-status"><span class="dot on"></span>正在审理</span></div>';
+  return '<div class="court-session" aria-label="正在开庭"><div class="court-session-mark" aria-hidden="true">'+icon('scale')+'</div><div class="court-session-copy"><span class="court-session-kicker">BROKEN ARROW · COURT IN SESSION</span><strong>现在开庭</strong><p>人人有刑判，天天吃牢饭</p></div><div class="court-session-seal" aria-hidden="true">蘸饭<br>法庭</div><span class="court-session-status"><span class="dot on"></span>正在审理</span></div>';
 }
 function courtModePanel(){
   return '<section class="court-mode-panel" aria-labelledby="court-mode-title"><div class="court-mode-icon">'+icon('gavel')+'</div><div class="grow"><h2 id="court-mode-title">开庭模式</h2><p>切换法庭主题与界面称呼。由本地服务端统一控制，公开网页随下一次发布更新。</p><small>开启：审判大厅 · 对局卷宗 · 庭审分析 · 看守所 · 书记官室</small></div><div class="court-mode-action">'+badge(isCourtMode()?'正在开庭':'常规界面',isCourtMode()?'yellow':'muted')+(isAdmin()?button(isCourtMode()?'休庭，恢复常规界面':'开庭，启用法庭界面','toggle-court-mode','gavel','primary'):badge('仅管理员可切换','muted'))+'</div></section>';
