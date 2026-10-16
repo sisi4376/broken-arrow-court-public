@@ -1,13 +1,15 @@
 export const TITLE = '断剑蘸饭审判法庭';
 export const MIN_FRIENDS = 3;
-// BATrace's public map directory, verified on 2026-10-15. Unlisted IDs stay unknown.
+// BATrace base directory; live IDs 25/27/28 corrected from Aqualung on 2026-10-16.
+// https://ba.aqualung.dev/data/maps/index.json
 export const MAPS = Object.freeze({
   '1': 'Test_map', '2': 'Demo_visual', '3': 'Baltiisk', '4': 'Coast',
   '5': 'Airport', '6': 'River', '7': 'Dam', '8': 'Tallinn Harbour',
   '9': 'Airbase', '10': 'Frontiers', '11': 'Central Village', '12': 'Oil refinery',
   '13': 'Suwalki', '14': 'Jelgava', '15': 'Narva', '16': 'Klaipeda', '17': 'Ruda',
   '20': 'Parnu', '21': 'Chernyakhovsk', '22': 'Ignalina Powerplant',
-  '23': 'Kaliningrad', '24': 'Kadaga', '25': 'Coal Mountain', '26': 'Daugavpils',
+  '23': 'Kaliningrad', '24': 'Kadaga', '25': 'Kadaga Military Base', '26': 'Daugavpils',
+  '27': 'Daugavpils', '28': 'Coal Mountain',
 });
 
 export function mapName(id) {
