@@ -14,7 +14,7 @@ const NAV = [['dashboard','layout-dashboard','法庭总览'],['matches','archive
 const S = { user:null, setup:false, registering:false, invite:'', members:[], maps:[], modes:[], sync:null, route:'dashboard', page:1, detailTab:'summary', analyticsTab:'members', filters:{days:'0',member:'',map:'',mode:'0',team:'',from:'',to:''}, scope:'qualified', query:'', currentMatch:null, selectedPlayer:'', unitSearch:'', compareA:'',compareB:'', version:0 };
 Object.assign(S,{friendTab:"overview",analysisMin:5,currentFriend:null});
 Object.assign(S,{performanceMode:'battle',comboMin:5,supplyMin:5});
-S.courtMin=5;
+S.courtMin=5;S.courtComparison=false;S.courtCases=false;
 const $ = (s,root=document) => root.querySelector(s);
 const $$ = (s,root=document) => [...root.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -78,7 +78,7 @@ async function route({quiet=false}={}) {
     }else if(S.route==='members')$('#main').innerHTML=membersView();
     else if(S.route==='analytics'){
       const data=await api(`/api/dashboard?${params({combo_min_games:S.comboMin})}`);
-      const deep=S.analyticsTab==='court'?await api(`/api/analytics/zhanfan?${params({court_min_games:S.courtMin})}`):S.analyticsTab==='supply'?await api(`/api/analytics/supply?${params({supply_min_games:S.supplyMin})}`):['decks','maps','units'].includes(S.analyticsTab)?await api(`/api/analytics/overview?${params({min_games:S.analysisMin})}`):null;
+      const deep=S.analyticsTab==='court'?await api(`/api/analytics/zhanfan?${params({court_min_games:S.courtMin,court_compare:S.courtComparison?'1':null,court_cases:S.courtCases?'1':null})}`):S.analyticsTab==='supply'?await api(`/api/analytics/supply?${params({supply_min_games:S.supplyMin})}`):['decks','maps','units'].includes(S.analyticsTab)?await api(`/api/analytics/overview?${params({min_games:S.analysisMin})}`):null;
       if(version!==S.version)return;$('#main').innerHTML=analyticsView(data,deep);
     }else if(S.route==='friend'){
       const id=hash.split('/')[1];if(!/^\d+$/.test(id??''))throw new Error(courtText('无效的朋友 ID'));
@@ -175,6 +175,11 @@ if(READ_ONLY)setInterval(async()=>{if(document.hidden)return;try{if(await window
 const {courtPanel,courtView}=createCourt({S,esc,icon,fmt,empty});
 const {friendView,deepAnalytics,participantDeck}=createAnalysis({S,esc,icon,fmt,pct,ratio,delta,signedClass,badge,empty,kpi,heading,filterBar,time,unitName,canManage,button,footer,modal,toast,api,closeModal,route,icons,$,courtPanel});
 const {performanceTabs,detailPerformance,supplyView}=createPerformance({S,esc,icon,fmt,empty});
+
+document.addEventListener('click',async event=>{
+  const el=event.target.closest('[data-court-view]');if(!el||!['current','compare','cases'].includes(el.dataset.courtView))return;
+  S.courtComparison=el.dataset.courtView==='compare';S.courtCases=el.dataset.courtView==='cases';try{await route();}catch(error){toast(error.message,true);}
+});
 document.addEventListener('click',async event=>{
   const el=event.target.closest('[data-action="performance-mode"]');if(!el)return;
   if(!['battle','economy','supply'].includes(el.dataset.value))return;

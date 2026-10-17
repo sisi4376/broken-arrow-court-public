@@ -1,6 +1,7 @@
 import { dashboard, listMatches, unitStats, memberStats, supplyAnalysis } from './queries.mjs';
 import { overallAnalysis, friendAnalysis, deckModel, identifyDeck, specName } from './analysis.mjs';
-import { zhanfanAnalysis } from './zhanfan.mjs';
+import { zhanfanAnalysis, zhanfanComparison } from './zhanfan.mjs';
+import { courtReview } from './court-review.mjs';
 
 export function createReader(base, { fetcher = fetch, sqlite = window.initSqlJs } = {}) {
   let snapshot = null;
@@ -58,7 +59,7 @@ export function createReader(base, { fetcher = fetch, sqlite = window.initSqlJs 
       if (path === '/api/matches') return listMatches(store, url.searchParams);
       if (path === '/api/analytics/members') return { members: memberStats(store, url.searchParams) };
       if (path === '/api/analytics/supply') return supplyAnalysis(store, url.searchParams);
-      if (path === '/api/analytics/zhanfan') return zhanfanAnalysis(store, url.searchParams);
+      if (path === '/api/analytics/zhanfan') return (url.searchParams.get('court_cases')==='1'?courtReview:url.searchParams.get('court_compare')==='1'?zhanfanComparison:zhanfanAnalysis)(store, url.searchParams);
       if (path === '/api/analytics/units') return { units: unitStats(store, url.searchParams) };
       if (path === '/api/analytics/overview') return overallAnalysis(store,url.searchParams);
       const friend=path.match(/^\/api\/members\/(\d+)\/analysis$/);
