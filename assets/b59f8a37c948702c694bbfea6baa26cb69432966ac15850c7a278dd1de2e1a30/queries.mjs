@@ -1,4 +1,5 @@
 import { mapName } from './domain.mjs';
+import { airSuperiorityStats } from './air-superiority.mjs';
 
 // Complete protobuf detail omits zero-valued scalars; missing detail is not zero.
 const DETAIL_METRICS = {
@@ -100,13 +101,18 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     GROUP BY r.member_id,u.unit_id ORDER BY r.member_id,kills DESC,deployments DESC,u.unit_id`,...f.args);
   const byMember = new Map();
   for(const unit of heavyUnits){const list=byMember.get(unit.member_id)??[];list.push(unit);byMember.set(unit.member_id,list);}
+  const air=airSuperiorityStats(store,f);
   const members = memberStats(store, params).map(m=>{
     const units=byMember.get(m.member_id)??[];
     const samples=heavySamples.get(m.member_id)??0;
     const total=samples?units.reduce((sum,u)=>sum+u.kills,0):null;
+    const a=air.members.get(m.member_id),airSamples=a?.matches??0;
     return {...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,win_rate:m.decided?m.wins/m.decided:null,
       heavy_aa_kills:total,avg_heavy_aa_kills:samples?total/samples:null,heavy_aa_kill_matches:samples,
-      heavy_aa_kill_excluded:m.detail_matches-samples,heavy_aa_units:units};
+      heavy_aa_kill_excluded:m.detail_matches-samples,heavy_aa_units:units,
+      air_superiority_kills:airSamples?a.kills:null,avg_air_superiority_kills:airSamples?a.kills/airSamples:null,
+      air_superiority_matches:airSamples,air_superiority_excluded:a?.excluded??0,
+      air_superiority_units:[...(a?.units.values()??[])].sort((a,b)=>b.kills-a.kills||b.deployments-a.deployments||a.unit_id.localeCompare(b.unit_id)||a.option_ids.join(',').localeCompare(b.option_ids.join(',')))};
   });
   const eligible = members.filter(m => m.supply_matches >= min);
   function ranking(key,samples,direction) {
@@ -126,9 +132,10 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     {id:'wins',title:'胜率拖堂罪',subtitle:'再赢一把就散庭。',key:'win_rate',label:'开黑胜率',samples:'decided',sample_label:'已知胜负',direction:'asc',format:'percent',icon:'flag'},
     {id:'objectives',title:'占点旷工罪',subtitle:'地图那么大，偏偏绕着点走。',key:'avg_objectives',label:'场均占点',samples:'objectives_matches',sample_label:'占点记录',direction:'asc',format:'number',icon:'flag'},
     {id:'heavy_aa_kills',title:'重防赎罪榜',subtitle:'导弹打出战果，本庭酌情减刑。',key:'avg_heavy_aa_kills',label:'场均重防击杀数',samples:'heavy_aa_kill_matches',sample_label:'有效单位详情',direction:'desc',format:'decimal2',icon:'shield'},
+    {id:'air_superiority',title:'空优立功榜',subtitle:'空战挂载有战果，减刑凭据在手。',key:'avg_air_superiority_kills',label:'场均空优机击杀数',samples:'air_superiority_matches',sample_label:'有效挂载详情',direction:'desc',format:'decimal2',icon:'plane'},
   ];
-  const charges=definitions.map(d=>({...d,group:['transport','heavy_aa_kills'].includes(d.id)?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
-  return { min_games:min,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges };
+  const charges=definitions.map(d=>({...d,group:['transport','heavy_aa_kills','air_superiority'].includes(d.id)?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
+  return { min_games:min,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges,air_superiority_model:air.model };
 }
 
 export function listMatches(store, params, candidates = false) {
