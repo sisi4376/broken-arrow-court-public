@@ -64,13 +64,14 @@ export const INDEPENDENT_RULES = {
   food_contribution_limit: 50,
 };
 
-export function independentRatioPenalty(value, reference, buffer, cap=100) {
+export function independentRatioPenalty(value, reference, buffer, cap=100, floor=0, slope=INDEPENDENT_RULES.slope) {
   if ([value, reference, buffer].some(n => typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > Number.MAX_SAFE_INTEGER)) return null;
   if (!Number.isInteger(cap) || cap < 100 || cap > 200) return null;
+  if (!Number.isInteger(floor) || floor < -100 || floor > 0 || !Number.isFinite(slope) || slope <= 0) return null;
   if (value === reference) return 50;
   if (!value && !buffer) return cap;
-  if (!reference && !buffer) return 0;
-  return Math.max(0,Math.min(cap,50-INDEPENDENT_RULES.slope*(Math.log2(value+buffer)-Math.log2(reference+buffer))));
+  if (!reference && !buffer) return floor;
+  return Math.max(floor,Math.min(cap,50-slope*(Math.log2(value+buffer)-Math.log2(reference+buffer))));
 }
 
 export function independentEvidence(g, team, model) {
@@ -81,10 +82,11 @@ export function independentEvidence(g, team, model) {
   if (!active) return null;
   const mean = key => others.reduce((sum, t) => sum + t.values[key] / others.length, 0);
   const references = { destruction: mean('destruction'), damage: mean('damage'), objectives: mean('objectives') };
-  const cap=rule.score_cap??100;
-  const combatBase = 0.6 * independentRatioPenalty(v.destruction, references.destruction, rule.destruction_buffer,cap) +
-    0.4 * independentRatioPenalty(v.damage, references.damage, rule.damage_buffer,cap);
-  const exchangeBase = independentRatioPenalty(v.destruction, v.losses, rule.destruction_buffer,cap);
+  const cap=rule.score_cap??100,floor=rule.score_floor??0;
+  const penalty=(value,reference,buffer)=>independentRatioPenalty(value,reference,buffer,cap,floor,rule.slope);
+  const combatBase = 0.6 * penalty(v.destruction, references.destruction, rule.destruction_buffer) +
+    0.4 * penalty(v.damage, references.damage, rule.damage_buffer);
+  const exchangeBase = penalty(v.destruction, v.losses, rule.destruction_buffer);
   const objectiveCredit = rule.relief_cap * unit((v.objectives - references.objectives) / (references.objectives + rule.objectives_buffer));
   const specialistValues = ['heavy', 'air'].filter(kind => team.every(t => t.unit_evidence[kind].known)).map(kind => {
     const reference = others.reduce((sum, t) => sum + t.unit_evidence[kind].kills / others.length, 0);
@@ -93,7 +95,7 @@ export function independentEvidence(g, team, model) {
   });
   const specialistCredit = Math.max(0, ...specialistValues.map(e => e.credit));
   const credit = Math.max(objectiveCredit, specialistCredit);
-  const combatPenalty = Math.max(0, combatBase - credit), exchangePenalty = Math.max(0, exchangeBase - credit);
+  const combatPenalty = Math.max(floor, combatBase - credit), exchangePenalty = Math.max(floor, exchangeBase - credit);
   const net_received = Math.max(0, v.received - v.supplied);
   const share = unit(net_received / Math.max(v.consumed, v.received, rule.supply_buffer));
   const excessSupply = unit((share - rule.free_supply_share) / (1 - rule.free_supply_share));
@@ -109,6 +111,7 @@ export function independentEvidence(g, team, model) {
     support:{available:specialistValues.length>0,credit:specialistRelief},
     evidence:{values:{...v},references,combat_base:combatBase,exchange_base:exchangeBase,
       ...(rule.score_cap?{item_cap:cap}:{}),
+      ...(rule.score_floor!==undefined?{item_floor:floor}:{}),
       support_credit:credit,combat_penalty:combatPenalty,exchange_penalty:exchangePenalty,
       weak_combat:combatPenalty>50,weak_exchange:exchangePenalty>50,
       risk:combatPenalty>50||exchangePenalty>50||penalties.dependency>0||penalties.discipline>0,

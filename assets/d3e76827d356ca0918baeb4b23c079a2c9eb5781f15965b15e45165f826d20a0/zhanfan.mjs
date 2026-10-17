@@ -107,6 +107,27 @@ export function createOvercapModel(scoreCap=150) {
     ].map(b=>{const raw_core=independentRatioPenalty(b.ratio,1,0,scoreCap),score=clamp(raw_core+20*(0.5-b.win_rate));return {...b,raw_core,score,sentence_months:sentenceMonths(score)};})};
 }
 export const ZHANFAN_OVERCAP_MODEL=createOvercapModel();
+export const ZHANFAN_SIGNED_MODEL={
+  ...ZHANFAN_OVERCAP_MODEL,version:'zhanfan-v8-signed',
+  context:{...INDEPENDENT_RULES,score_floor:-50,score_cap:150,slope:50},
+  benchmarks:[
+    {name:'四倍兑现与交换、50% 胜率',ratio:4,win_rate:.5},
+    {name:'双倍兑现与交换、60% 胜率',ratio:2,win_rate:.6},
+    {name:'参考产出、等价交换、50% 胜率',ratio:1,win_rate:.5},
+    {name:'半数兑现与交换、50% 胜率',ratio:.5,win_rate:.5},
+    {name:'四分之一兑现与交换、80% 胜率',ratio:.25,win_rate:.8},
+  ].map(b=>{const raw_core=independentRatioPenalty(b.ratio,1,0,150,-50,50),score=clamp(raw_core+20*(.5-b.win_rate));return {...b,raw_core,score,sentence_months:sentenceMonths(score)};}),
+};
+const EXPANDED_SENTENCING={...ZHANFAN_MODEL.sentencing,life_score:75};
+export const ZHANFAN_EXPANDED_MODEL={
+  ...ZHANFAN_SIGNED_MODEL,version:'zhanfan-v9-expanded',
+  sentencing:EXPANDED_SENTENCING,
+  context:{...INDEPENDENT_RULES,score_floor:-100,score_cap:200,slope:75},
+  benchmarks:ZHANFAN_SIGNED_MODEL.benchmarks.map(b=>{
+    const raw_core=independentRatioPenalty(b.ratio,1,0,200,-100,75),score=clamp(raw_core+20*(.5-b.win_rate));
+    return {...b,raw_core,score,sentence_months:sentenceMonths(score,EXPANDED_SENTENCING)};
+  }),
+};
 function clamp(n) { return Math.max(0,Math.min(100,n)); }
 const rounded = n => Math.round(n*10)/10;
 const KEYS = {destruction:'DestructionScore',losses:'LossesScore',objectives:'ObjectivesCaptured',damage:'DamageDealt',friendly_fire:'DamageFriendlyFireDealt',supplied:'SupplyPointsConsumedByAllies',received:'SupplyPointsConsumedFromAllies',consumed:'SupplyPointsConsumed'};
@@ -121,12 +142,13 @@ export function calibratedScore(raw,model=ZHANFAN_MODEL) {
 export function sentenceLabel(months) {
   return sentenceDetails(months).sentence;
 }
-export function sentenceMonths(score) {
+export function sentenceMonths(score,rule=ZHANFAN_MODEL.sentencing) {
   if(typeof score!=='number'||!Number.isFinite(score))return null;
-  const value=clamp(score),rule=ZHANFAN_MODEL.sentencing;
+  const value=clamp(score);
   if(value<=rule.acquittal_score)return 0;
   const severity=(value-rule.acquittal_score)/(rule.life_score-rule.acquittal_score);
-  return Math.min(ZHANFAN_MODEL.max_months,Math.max(1,Math.round(ZHANFAN_MODEL.life_months*severity**rule.exponent)));
+  const months=Math.min(ZHANFAN_MODEL.max_months,Math.max(1,Math.round(ZHANFAN_MODEL.life_months*severity**rule.exponent)));
+  return value<rule.life_score?Math.min(ZHANFAN_MODEL.life_months-1,months):months;
 }
 export function sentenceDetails(months) {
   if(typeof months!=='number'||!Number.isFinite(months))return {sentence:'待取证',stage:'待取证',flavor:'证据尚未到齐，先把完整战报端上来。',life:false};
@@ -290,7 +312,7 @@ function analyze(store,params,model) {
         m.context.exchange_matches+=Number(evidence.weak_exchange??(penalties.exchange>0));
         m.context.objective_relief_matches+=Number(evidence.objective_relief>0);
         m.context.specialist_relief_matches+=Number(evidence.specialist_relief>0);
-        m.context.contribution_sum+=evidence.contribution??Math.max(0,1-penalties.pressure/100);
+        m.context.contribution_sum+=evidence.contribution??Math.max(0,Math.min(1,1-penalties.pressure/100));
         const points=model.dimensions.filter(d=>d.key!=='victory').reduce((sum,d)=>sum+penalties[d.key]*d.weight/100,0);
         m.context.examples.push({match_id:match.match_id,...evidence,points,
           ...(model.aggregation?{core_points:model.dimensions.filter(d=>d.kind==='core').reduce((sum,d)=>sum+penalties[d.key]*d.weight/100,0)}:{})});
@@ -312,14 +334,15 @@ function analyze(store,params,model) {
       return {...d,samples,average,penalty,points:penalty===null?null:(penalty-(d.center??0))*d.weight/100,change:penalty===null?null:(penalty-d.prior)*d.weight/100};
     });
     const raw=n?aggregate(components,model):null,raw_score=n?Math.round(raw*100)/100:null;
-    const score=n?rounded(calibratedScore(raw,model)):null,months=sentenceMonths(score);
-    const variants=n?[score,...components.flatMap(c=>[aggregate(components,model,c.key,0.8),aggregate(components,model,c.key,1.2)].map(v=>rounded(calibratedScore(v,model))))].map(sentenceMonths):[];
+    const score=n?rounded(calibratedScore(raw,model)):null,months=sentenceMonths(score,model.sentencing);
+    const variants=n?[score,...components.flatMap(c=>[aggregate(components,model,c.key,0.8),aggregate(components,model,c.key,1.2)].map(v=>rounded(calibratedScore(v,model))))].map(v=>sentenceMonths(v,model.sentencing)):[];
     if(model.aggregation){
       rest.score_breakdown={core:n?components.filter(c=>c.kind==='core').reduce((sum,c)=>sum+c.points,0):null,
         adjustments:components.filter(c=>c.kind==='adjustment').map(c=>({key:c.key,name:c.name,points:c.points})),
         before_clamp:n?components.reduce((sum,c)=>sum+c.points,0):null,
         ceiling_without_extras:n?clamp(50+((model.context.score_cap??100)-50)*reliability+components.find(c=>c.key==='victory').points):null,
-        ...(model.context.score_cap?{item_cap:model.context.score_cap}:{})};
+        ...(model.context.score_cap?{item_cap:model.context.score_cap}:{}),
+        ...(model.context.score_floor!==undefined?{item_floor:model.context.score_floor}:{})};
     }
     if(rest.context){
       const examples=rest.context.examples;
@@ -339,7 +362,10 @@ function analyze(store,params,model) {
 }
 
 export function zhanfanAnalysis(store,params=new URLSearchParams()) {
-  return analyze(store,params,ZHANFAN_OVERCAP_MODEL);
+  return analyze(store,params,ZHANFAN_EXPANDED_MODEL);
+}
+export function signedZhanfanAnalysis(store,params=new URLSearchParams()) {
+  return analyze(store,params,ZHANFAN_SIGNED_MODEL);
 }
 export function overcapZhanfanAnalysis(store,params=new URLSearchParams(),scoreCap=ZHANFAN_OVERCAP_MODEL.context.score_cap) {
   return analyze(store,params,createOvercapModel(scoreCap));
@@ -395,7 +421,15 @@ export function contextZhanfanComparison(store,params=new URLSearchParams()) {
 }
 
 export function zhanfanComparison(store,params=new URLSearchParams()) {
-  return compareReports(zhanfanAnalysis(store,params),coreZhanfanAnalysis(store,params));
+  return compareReports(zhanfanAnalysis(store,params),signedZhanfanAnalysis(store,params));
+}
+
+export function signedZhanfanComparison(store,params=new URLSearchParams()) {
+  return compareReports(signedZhanfanAnalysis(store,params),overcapZhanfanAnalysis(store,params));
+}
+
+export function overcapZhanfanComparison(store,params=new URLSearchParams()) {
+  return compareReports(overcapZhanfanAnalysis(store,params),coreZhanfanAnalysis(store,params));
 }
 
 export function coreZhanfanComparison(store,params=new URLSearchParams()) {
