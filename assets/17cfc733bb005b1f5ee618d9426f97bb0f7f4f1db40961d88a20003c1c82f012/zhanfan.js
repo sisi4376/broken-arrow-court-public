@@ -42,7 +42,7 @@ export function createCourt({S,esc,icon,fmt,empty}) {
       {index:4,key:'win_rate',label:'评分局胜率',value:r=>r.win_rate},
       {index:5,key:'samples',label:'可评估局数',value:r=>r.scored_matches},
     ]):empty(courtText('暂无登记朋友'),'','','scale',true);
-    return courtHtml`<div class="section-heading"><h2>蘸饭指数榜</h2><small>${data.model.sentencing.acquittal_score} 分及以下当庭释放 · 娱乐判决</small></div><div class="analysis-controls"><label>蘸饭榜最低可评估局数<input id="court-min" type="number" min="1" max="10000" step="1" value="${data.min_games}"></label><span class="hint">${data.ranked} / ${data.members.length} 位朋友达到门槛 · ${esc(data.model.version)}</span></div>${table}<div class="notice section-space">${icon('info')}六维评分，含胜负表现 ${data.model.dimensions.find(d=>d.key==='victory').weight}%；固定刻度展开长期均分，不按朋友内部名次强制分配刑期。胜率只统计可评分且胜负明确的对局，不同于全部参战胜率。低于门槛不排名，个人页面可查看分项依据。</div>${rules(data.model)}`;
+    return courtHtml`<div class="section-heading"><h2>蘸饭刑期榜</h2><small>${data.model.sentencing.acquittal_score} 分及以下当庭释放 · 娱乐判决</small></div><div class="analysis-controls"><label>蘸饭榜最低可评估局数<input id="court-min" type="number" min="1" max="10000" step="1" value="${data.min_games}"></label><span class="hint">${data.ranked} / ${data.members.length} 位朋友达到门槛 · ${esc(data.model.version)}</span></div>${table}<div class="notice section-space">${icon('info')}六维评分，含胜负表现 ${data.model.dimensions.find(d=>d.key==='victory').weight}%；固定刻度展开长期均分，不按朋友内部名次强制分配刑期。胜率只统计可评分且胜负明确的对局，不同于全部参战胜率。低于门槛不排名，个人页面可查看分项依据。</div>${rules(data.model)}`;
   }
   return {courtPanel,courtView};
 }

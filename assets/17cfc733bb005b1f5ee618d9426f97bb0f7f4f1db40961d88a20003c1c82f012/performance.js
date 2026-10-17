@@ -20,17 +20,20 @@ export function createPerformance({S,esc,icon,fmt,empty}) {
       ...columns.map(([key,label],i)=>({index:i+3,key,label,value:r=>r[key]})),
     ])+courtHtml`<p class="hint section-space">${supply?courtText('从队友补给包括所有同队玩家，不仅限于登记朋友。补给队友不等于自己消耗补给。'):'出场、退款、击毁数量与经验来自完整赛后详情。'}场均值仅以详情完整的对局为分母；同一朋友同局多账号先合并，缺失详情不记为零。</p>`;
   }
-  function rankingTable(rows,key,title,description,ico) {
-    const content=rows.length?sortableTable('supply-'+key,courtHtml`<div class="table-wrap"><table class="supply-ranking"><thead><tr><th class="numeric">名次</th><th>朋友</th><th class="numeric">${description}</th><th class="numeric">完整详情 / 开黑局数</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="numeric mono ${r.rank===1?'yellow':''}">${r.rank}</td><td class="table-title">${friend(r)}</td><td class="numeric mono ${key==='avg_supplied_allies'?'positive':'cyan'}">${fmt(r[key],1)}</td><td class="numeric mono">${fmt(r.supply_matches)} / ${fmt(r.matches)}</td></tr>`).join('')}</tbody></table></div>`,rows,[
+  function rankingTable(charge) {
+    const {rows,key,title,label,icon:ico,direction,sample_label,format}=charge;
+    const value=r=>r[key]==='Infinity'?'∞':format==='percent'?`${fmt(100*r[key],1)}%`:format==='signed'?`${r[key]>0?'+':''}${fmt(r[key],1)}`:fmt(r[key],format==='ratio'?2:1);
+    const evidence=r=>charge.id==='kd'?`击毁 ${fmt(r.kills)} / 损失 ${fmt(r.units_lost)}`:charge.id==='rating'?`累计 ${r.rating_delta>0?'+':''}${fmt(r.rating_delta,1)}`:charge.id==='wins'?`${fmt(r.wins??0)} 胜 / ${fmt(r.losses_count??0)} 负`:charge.id==='losses'?`累计损失分 ${fmt(r.losses,1)}`:'';
+    const content=rows.length?sortableTable('charge-'+charge.id,courtHtml`<div class="table-wrap"><table class="supply-ranking"><thead><tr><th class="numeric">名次</th><th>朋友</th><th class="numeric">${esc(label)}</th><th class="numeric">${esc(sample_label)} / 开黑局数</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="numeric mono ${r.rank===1?'yellow':''}">${r.rank}</td><td class="table-title">${friend(r)}</td><td class="numeric mono">${value(r)}${evidence(r)?`<div class="table-sub">${esc(evidence(r))}</div>`:''}</td><td class="numeric mono">${fmt(r.sample_count)} / ${fmt(r.matches)}</td></tr>`).join('')}</tbody></table></div>`,rows,[
       {index:0,key:'rank',label:'名次',value:r=>r.rank,first:'asc'},
       {index:1,key:'name',label:courtText('朋友'),type:'text',value:r=>r.name},
-      {index:2,key,label:description,value:r=>r[key]},
-      {index:3,key:'samples',label:courtText('完整详情'),value:r=>r.supply_matches},
-    ]):empty(courtText('暂无达到门槛的朋友'),courtHtml`至少 ${S.supplyMin} 局完整详情`,'',ico,true);
-    return `<section class="supply-ranking-section"><div class="section-heading"><h2>${icon(ico)}${title}</h2><small>${description}</small></div>${content}</section>`;
+      {index:2,key,label,value:r=>r[key],first:direction},
+      {index:3,key:'samples',label:sample_label,value:r=>r.sample_count},
+    ]):empty(courtText('暂无达到门槛的朋友'),`至少 ${S.supplyMin} 局${sample_label}；无有效比率时不排名`,'',ico,true);
+    return `<section class="supply-ranking-section" data-charge="${esc(charge.id)}"><div class="section-heading charge-heading"><div><h2>${icon(ico)}${esc(title)}</h2><p class="charge-flavor">${esc(charge.subtitle)}</p></div><small>默认从${direction==='asc'?'少到多':'多到少'}</small></div>${content}</section>`;
   }
   function supplyView(data) {
-    return courtHtml`<div class="analysis-controls"><label>补给榜最低完整局数<input id="supply-min" type="number" min="1" max="10000" step="1" value="${data.min_games}"></label><span class="hint">${data.eligible} / ${data.members.length} 位朋友达到门槛</span></div><div class="supply-rankings">${rankingTable(data.hungry,'avg_received_allies','小馋猫榜','场均消耗队友补给','utensils')}${rankingTable(data.transport,'avg_supplied_allies','运输大队长榜','场均补给队友','truck')}</div><div class="notice section-space">${icon('info')}按当前筛选下的完整开黑对局计算场均值；同一朋友同局多账号先合并。队友包含未登记的同队玩家，不代表只在朋友之间发生的补给。缺失详情不记零，完整详情中省略的零值按零计入；相同均值并列。</div>`;
+    return courtHtml`<div class="section-heading"><h2>蘸饭罪名榜</h2><small>单项证据 · 各罪分别排名</small></div><div class="analysis-controls"><label>罪名榜最低有效局数<input id="supply-min" type="number" min="1" max="10000" step="1" value="${data.min_games}"></label><span class="hint">${data.members.length} 位朋友有参战记录；各项按自己的有效样本判断门槛</span></div><div class="supply-rankings">${(data.charges??[]).map(rankingTable).join('')}</div><div class="notice section-space">${icon('info')}同一朋友同局多账号先合并。补给、击毁与单位 K/D 使用完整详情；K/D 为击毁单位数 / 损失单位数，0 / 0 不排名。损失按损失分，胜率按已知胜负，掉分按场均评分变化（同时列出累计变化）。缺失记录不记零，有效详情省略的零值按零计入；相同数值并列。各榜名次独立，不修改蘸饭刑期的计算方式。</div>`;
   }
   return {performanceTabs,detailPerformance,supplyView};
 }

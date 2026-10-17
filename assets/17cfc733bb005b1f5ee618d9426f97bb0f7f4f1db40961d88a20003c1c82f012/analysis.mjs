@@ -109,6 +109,14 @@ function unitPreferences(store,params,allRows,memberId) {
   const complete=allRows.filter(r=>(!memberId||r.member_id===memberId)&&r.complete).length;
   return [...groups.values()].map(g=>({...finish(g),damage:g.unit_damage,usage_rate:complete?g.matches/complete:null})).sort((a,b)=>b.matches-a.matches||b.instances-a.instances||String(a.unit_id).localeCompare(String(b.unit_id)));
 }
+function unitHighlights(units) {
+  const highest=key=>{
+    const eligible=units.filter(u=>Number.isFinite(u[key])&&u[key]>0);
+    const maximum=Math.max(0,...eligible.map(u=>u[key]));
+    return eligible.filter(u=>u[key]===maximum).sort((a,b)=>String(a.unit_id).localeCompare(String(b.unit_id),'en',{numeric:true}));
+  };
+  return {most_used:highest('instances'),most_damage:highest('damage'),most_kills:highest('kills')};
+}
 function summarize(rows,min) {
   const total=metric();rows.forEach(r=>add(total,r));
   const decks=groupStats(rows,r=>r.deck.key,r=>({key:r.deck.key,name:r.deck.name,country:r.deck.country,spec_ids:r.deck.spec_ids??[]}));
@@ -130,7 +138,7 @@ export function friendAnalysis(store,id,params=new URLSearchParams()) {
   const base=summarize(rows,min);
   const teammates=relationships(all,member.id,min),units=unitPreferences(store,scoped,rows,member.id);
   const court=zhanfanAnalysis(store,scoped);
-  return {...base,member,min_games:min,teammates,units,trend:trend(rows),stats:memberStats(store,scoped).find(m=>m.member_id===member.id)??null,
+  return {...base,member,min_games:min,teammates,units,unit_highlights:unitHighlights(units),trend:trend(rows),stats:memberStats(store,scoped).find(m=>m.member_id===member.id)??null,
     court:{model:court.model,min_games:court.min_games,report:court.members.find(r=>r.member_id===member.id)??null},
     recent_matches:rows.slice(-20).reverse().map(r=>({id:r.match_id,end_time:r.end_time,map:mapName(r.map_id),won:r.won,rating_delta:r.rating_delta,deck:r.deck,destruction:r.destruction,losses:r.losses,accounts:r.accounts})),
     model:{updated_at:model.updated_at??null,db_file:model.db_file??null}};

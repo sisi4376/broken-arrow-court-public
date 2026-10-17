@@ -111,7 +111,7 @@ function comboTable(combos){if(!combos.length)return empty(courtText('暂无同�
 {index:3,key:'wins',label:'胜场',value:r=>r.wins},
 {index:4,key:'decided',label:'已知结果',value:r=>r.decided}]);}
 function analyticsView(data,deep) {
-  const tabs=[['members',courtText('朋友表现')],['court','蘸饭指数榜'],['combos',courtText('同队搭档')],['supply','补给分析'],['decks','专精组合'],['maps','地图胜率'],['units','单位表现']];
+  const tabs=[['members',courtText('朋友表现')],['court','蘸饭刑期榜'],['combos',courtText('同队搭档')],['supply','蘸饭罪名榜'],['decks','专精组合'],['maps','地图胜率'],['units','单位表现']];
   return heading(courtText('开黑分析'),'FRIENDS / ANALYTICS',courtText('多账号合并到同一位朋友；点击朋友姓名查看详细分析。'))+filterBar()+`<div class="tabs analysis-tabs">${tabs.map(([v,n])=>`<button data-action="analytics-tab" data-value="${v}" class="${S.analyticsTab===v?'active':''}">${n}</button>`).join('')}</div>`+
     (deep?S.analyticsTab==='court'?courtView(deep):S.analyticsTab==='supply'?supplyView(deep):deepAnalytics(deep):S.analyticsTab==='members'?memberTable(data.members)+courtHtml`<div class="notice section-space">${icon('info')}按场均展示；同一朋友同局多账号先合并。详情指标不以缺失场次充零；分数交换比使用累计摧毁分 / 累计损失分。</div>`:courtHtml`<div class="analysis-controls"><label>同队搭档最低局数<input id="combo-min" type="number" min="1" max="10000" step="1" value="${data.combo_min_games}"></label><span class="hint">${data.combos.length} 组搭档达到门槛</span></div>`+comboTable(data.combos)+courtHtml`<div class="notice section-space">${icon('info')}仅计算合格开黑局中的同队搭档，少于 ${data.combo_min_games} 局的组合不显示。胜率仅以结果已知的场次为分母。</div>`);
 }

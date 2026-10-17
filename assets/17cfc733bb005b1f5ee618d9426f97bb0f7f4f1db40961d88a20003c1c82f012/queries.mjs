@@ -49,6 +49,7 @@ export function memberStats(store, params = new URLSearchParams()) {
     AVG(destruction) AS avg_destruction,COUNT(destruction) AS destruction_matches,
     AVG(losses) AS avg_losses,COUNT(losses) AS losses_matches,
     AVG(objectives) AS avg_objectives,COUNT(objectives) AS objectives_matches,
+    AVG(rating_delta) AS avg_rating_delta,COUNT(rating_delta) AS rating_matches,
     COUNT(friendly_fire) AS friendly_fire_matches,COUNT(damage) AS detail_matches,COUNT(supply_consumed) AS supply_matches,
     ${Object.keys(DETAIL_METRICS).map(name => `AVG(${name}) AS avg_${name},SUM(${name}) AS ${name}`).join(',\n    ')},SUM(duration) AS duration
     FROM per_match GROUP BY member_id ORDER BY matches DESC,avg_destruction DESC`, ...f.args);
@@ -72,17 +73,27 @@ export function dashboard(store, params) {
 
 export function supplyAnalysis(store, params = new URLSearchParams()) {
   const min = minimumGames(params, 'supply_min_games');
-  const members = memberStats(store, params);
+  const members = memberStats(store, params).map(m=>({...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,win_rate:m.decided?m.wins/m.decided:null}));
   const eligible = members.filter(m => m.supply_matches >= min);
-  function ranking(key) {
+  function ranking(key,samples,direction) {
     let last = null, place = 0;
-    return [...eligible].sort((a,b) => b[key]-a[key] || b.supply_matches-a.supply_matches || a.member_id-b.member_id).map((row,i) => {
+    return members.filter(m=>m[samples]>=min&&m[key]!==null&&m[key]!==undefined).sort((a,b) => (direction==='asc'?Number(a[key])-Number(b[key]):Number(b[key])-Number(a[key])) || b[samples]-a[samples] || a.member_id-b.member_id).map((row,i) => {
       if (last === null || row[key] !== last) place = i+1;
       last = row[key];
-      return { ...row, rank: place };
+      return { ...row, rank: place, sample_count:row[samples] };
     });
   }
-  return { min_games: min, members, eligible: eligible.length, hungry: ranking('avg_received_allies'), transport: ranking('avg_supplied_allies') };
+  const definitions=[
+    {id:'hungry',title:'小馋猫罪',subtitle:'补给车一响，饭点准时到。',key:'avg_received_allies',label:'场均消耗队友补给',samples:'supply_matches',sample_label:'补给详情',direction:'desc',format:'number',icon:'utensils'},
+    {id:'transport',title:'运输怠工罪',subtitle:'车钥匙在手，队友还在等油。',key:'avg_supplied_allies',label:'场均补给队友',samples:'supply_matches',sample_label:'补给详情',direction:'asc',format:'number',icon:'truck'},
+    {id:'kd',title:'交换失职罪',subtitle:'出门气势如虹，交换略显沉重。',key:'unit_kd',label:'单位 K/D',samples:'detail_matches',sample_label:'完整详情',direction:'asc',format:'ratio',icon:'arrow-right-left'},
+    {id:'kills',title:'战场摸鱼罪',subtitle:'枪声很热闹，战果很安静。',key:'avg_kills',label:'场均击毁数量',samples:'detail_matches',sample_label:'完整详情',direction:'asc',format:'number',icon:'crosshair'},
+    {id:'losses',title:'白给浪费罪',subtitle:'装备刚出厂，对面就到账。',key:'avg_losses',label:'场均损失分',samples:'losses_matches',sample_label:'损失分记录',direction:'desc',format:'number',icon:'flame'},
+    {id:'wins',title:'胜率拖堂罪',subtitle:'再赢一把就散庭。',key:'win_rate',label:'开黑胜率',samples:'decided',sample_label:'已知胜负',direction:'asc',format:'percent',icon:'flag'},
+    {id:'rating',title:'偷偷掉分罪',subtitle:'嘴上说上分，账户在漏风。',key:'avg_rating_delta',label:'开黑场均评分变化',samples:'rating_matches',sample_label:'评分变化记录',direction:'asc',format:'signed',icon:'trending-down'},
+  ];
+  const charges=definitions.map(d=>({...d,rows:ranking(d.key,d.samples,d.direction)}));
+  return { min_games:min,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges };
 }
 
 export function listMatches(store, params, candidates = false) {
