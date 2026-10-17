@@ -121,11 +121,11 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     {id:'hungry',title:'小馋猫罪',subtitle:'补给车一响，饭点准时到。',key:'avg_received_allies',label:'场均消耗队友补给',samples:'supply_matches',sample_label:'补给详情',direction:'desc',format:'number',icon:'utensils'},
     {id:'transport',title:'运输大队长',subtitle:'补给送到位，减刑有机会。',key:'avg_supplied_allies',label:'场均补给队友',samples:'supply_matches',sample_label:'补给详情',direction:'desc',format:'number',icon:'truck'},
     {id:'kd',title:'KD失职罪',subtitle:'出门气势如虹，交换略显沉重。',key:'unit_kd',label:'单位 K/D',samples:'detail_matches',sample_label:'完整详情',direction:'asc',format:'ratio',icon:'arrow-right-left'},
-    {id:'kills',title:'战场摸鱼罪',subtitle:'枪声很热闹，战果很安静。',key:'avg_destruction',label:'场均击杀分',samples:'destruction_matches',sample_label:'击杀分记录',direction:'asc',format:'number',icon:'crosshair'},
+    {id:'kills',title:'击杀摸鱼罪',subtitle:'枪声很热闹，战果很安静。',key:'avg_destruction',label:'场均击杀分',samples:'destruction_matches',sample_label:'击杀分记录',direction:'asc',format:'number',icon:'crosshair'},
     {id:'losses',title:'白给浪费罪',subtitle:'装备刚出厂，对面就到账。',key:'avg_losses',label:'场均损失分',samples:'losses_matches',sample_label:'损失分记录',direction:'desc',format:'number',icon:'flame'},
     {id:'wins',title:'胜率拖堂罪',subtitle:'再赢一把就散庭。',key:'win_rate',label:'开黑胜率',samples:'decided',sample_label:'已知胜负',direction:'asc',format:'percent',icon:'flag'},
     {id:'objectives',title:'占点旷工罪',subtitle:'地图那么大，偏偏绕着点走。',key:'avg_objectives',label:'场均占点',samples:'objectives_matches',sample_label:'占点记录',direction:'asc',format:'number',icon:'flag'},
-    {id:'heavy_aa_kills',title:'重防赎罪榜',subtitle:'导弹打出战果，本庭酌情减刑。',key:'avg_heavy_aa_kills',label:'场均重防击杀数',samples:'heavy_aa_kill_matches',sample_label:'有效单位详情',direction:'desc',format:'number',icon:'shield'},
+    {id:'heavy_aa_kills',title:'重防赎罪榜',subtitle:'导弹打出战果，本庭酌情减刑。',key:'avg_heavy_aa_kills',label:'场均重防击杀数',samples:'heavy_aa_kill_matches',sample_label:'有效单位详情',direction:'desc',format:'decimal2',icon:'shield'},
   ];
   const charges=definitions.map(d=>({...d,group:['transport','heavy_aa_kills'].includes(d.id)?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
   return { min_games:min,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges };
