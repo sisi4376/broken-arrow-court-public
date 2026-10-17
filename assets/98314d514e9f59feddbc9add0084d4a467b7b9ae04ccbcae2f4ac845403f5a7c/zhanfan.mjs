@@ -1,6 +1,6 @@
 import { filters, minimumGames } from './queries.mjs';
 import { classifyAirLoadout } from './air-superiority.mjs';
-import { CONTEXT_RULES, contextualEvidence, INDEPENDENT_RULES, independentEvidence } from './court-model.mjs';
+import { CONTEXT_RULES, contextualEvidence, INDEPENDENT_RULES, independentEvidence, independentRatioPenalty } from './court-model.mjs';
 
 export const ZHANFAN_MODEL = {
   version: 'zhanfan-v2', prior_games: 10, raw_baseline: 40, baseline: 50, max_months: 360, life_months: 240,
@@ -94,6 +94,19 @@ export const ZHANFAN_CORE_MODEL = {
     {name:'四分之一兑现与交换、80% 胜率',ratio:0.25,win_rate:0.8,score:94},
   ].map(b=>({...b,sentence_months:sentenceMonths(b.score)})),
 };
+export function createOvercapModel(scoreCap=150) {
+  if(!Number.isInteger(scoreCap)||scoreCap<100||scoreCap>200)throw new RangeError('单项上限须为100～200的整数');
+  return {...ZHANFAN_CORE_MODEL,version:'zhanfan-v7-overcap',context:{...INDEPENDENT_RULES,score_cap:scoreCap},
+    benchmarks:[
+      {name:'双倍兑现与交换、60% 胜率',ratio:2,win_rate:0.6},
+      {name:'参考产出、等价交换、50% 胜率',ratio:1,win_rate:0.5},
+      {name:'半数兑现与交换、50% 胜率',ratio:0.5,win_rate:0.5},
+      {name:'四分之一兑现与交换、50% 胜率',ratio:0.25,win_rate:0.5},
+      {name:'八分之一兑现与交换、80% 胜率',ratio:0.125,win_rate:0.8},
+      {name:'十六分之一兑现与交换、80% 胜率',ratio:0.0625,win_rate:0.8},
+    ].map(b=>{const raw_core=independentRatioPenalty(b.ratio,1,0,scoreCap),score=clamp(raw_core+20*(0.5-b.win_rate));return {...b,raw_core,score,sentence_months:sentenceMonths(score)};})};
+}
+export const ZHANFAN_OVERCAP_MODEL=createOvercapModel();
 function clamp(n) { return Math.max(0,Math.min(100,n)); }
 const rounded = n => Math.round(n*10)/10;
 const KEYS = {destruction:'DestructionScore',losses:'LossesScore',objectives:'ObjectivesCaptured',damage:'DamageDealt',friendly_fire:'DamageFriendlyFireDealt',supplied:'SupplyPointsConsumedByAllies',received:'SupplyPointsConsumedFromAllies',consumed:'SupplyPointsConsumed'};
@@ -277,7 +290,7 @@ function analyze(store,params,model) {
         m.context.exchange_matches+=Number(evidence.weak_exchange??(penalties.exchange>0));
         m.context.objective_relief_matches+=Number(evidence.objective_relief>0);
         m.context.specialist_relief_matches+=Number(evidence.specialist_relief>0);
-        m.context.contribution_sum+=evidence.contribution??(1-penalties.pressure/100);
+        m.context.contribution_sum+=evidence.contribution??Math.max(0,1-penalties.pressure/100);
         const points=model.dimensions.filter(d=>d.key!=='victory').reduce((sum,d)=>sum+penalties[d.key]*d.weight/100,0);
         m.context.examples.push({match_id:match.match_id,...evidence,points,
           ...(model.aggregation?{core_points:model.dimensions.filter(d=>d.kind==='core').reduce((sum,d)=>sum+penalties[d.key]*d.weight/100,0)}:{})});
@@ -305,7 +318,8 @@ function analyze(store,params,model) {
       rest.score_breakdown={core:n?components.filter(c=>c.kind==='core').reduce((sum,c)=>sum+c.points,0):null,
         adjustments:components.filter(c=>c.kind==='adjustment').map(c=>({key:c.key,name:c.name,points:c.points})),
         before_clamp:n?components.reduce((sum,c)=>sum+c.points,0):null,
-        ceiling_without_extras:n?clamp(50+50*reliability+components.find(c=>c.key==='victory').points):null};
+        ceiling_without_extras:n?clamp(50+((model.context.score_cap??100)-50)*reliability+components.find(c=>c.key==='victory').points):null,
+        ...(model.context.score_cap?{item_cap:model.context.score_cap}:{})};
     }
     if(rest.context){
       const examples=rest.context.examples;
@@ -325,6 +339,12 @@ function analyze(store,params,model) {
 }
 
 export function zhanfanAnalysis(store,params=new URLSearchParams()) {
+  return analyze(store,params,ZHANFAN_OVERCAP_MODEL);
+}
+export function overcapZhanfanAnalysis(store,params=new URLSearchParams(),scoreCap=ZHANFAN_OVERCAP_MODEL.context.score_cap) {
+  return analyze(store,params,createOvercapModel(scoreCap));
+}
+export function coreZhanfanAnalysis(store,params=new URLSearchParams()) {
   return analyze(store,params,ZHANFAN_CORE_MODEL);
 }
 export function independentZhanfanAnalysis(store,params=new URLSearchParams()) {
@@ -375,7 +395,11 @@ export function contextZhanfanComparison(store,params=new URLSearchParams()) {
 }
 
 export function zhanfanComparison(store,params=new URLSearchParams()) {
-  return compareReports(zhanfanAnalysis(store,params),independentZhanfanAnalysis(store,params));
+  return compareReports(zhanfanAnalysis(store,params),coreZhanfanAnalysis(store,params));
+}
+
+export function coreZhanfanComparison(store,params=new URLSearchParams()) {
+  return compareReports(coreZhanfanAnalysis(store,params),independentZhanfanAnalysis(store,params));
 }
 
 export function independentZhanfanComparison(store,params=new URLSearchParams()) {
