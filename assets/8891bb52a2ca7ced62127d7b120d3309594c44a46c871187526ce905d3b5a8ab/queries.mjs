@@ -73,7 +73,19 @@ export function dashboard(store, params) {
 
 export function supplyAnalysis(store, params = new URLSearchParams()) {
   const min = minimumGames(params, 'supply_min_games');
-  const members = memberStats(store, params).map(m=>({...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,win_rate:m.decided?m.wins/m.decided:null}));
+  const f = filters(params);
+  // The source catalogue classifies every heavy air-defense model as role 15.
+  // Count deployments, including repeat spawns, refunds and alternate accounts.
+  const heavyUnits = store.all(`SELECT r.member_id,u.unit_id,COUNT(*) AS deployments,
+    COALESCE(json_extract(c.data_json,'$.hudName'),json_extract(c.data_json,'$.name'),u.unit_id) AS name
+    FROM unit_instances u JOIN registered_participants r ON r.match_id=u.match_id AND r.player_id=u.player_id
+    JOIN matches m ON m.id=u.match_id JOIN unit_catalogue c ON c.unit_id=u.unit_id
+    WHERE ${f.sql} AND m.detail_state='complete' AND CAST(json_extract(c.data_json,'$.role') AS INTEGER)=15
+    GROUP BY r.member_id,u.unit_id ORDER BY r.member_id,deployments DESC,u.unit_id`,...f.args);
+  const byMember = new Map();
+  for(const unit of heavyUnits){const list=byMember.get(unit.member_id)??[];list.push(unit);byMember.set(unit.member_id,list);}
+  const members = memberStats(store, params).map(m=>({...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,win_rate:m.decided?m.wins/m.decided:null,
+    heavy_aa_deployments:m.detail_matches?(byMember.get(m.member_id)??[]).reduce((sum,u)=>sum+u.deployments,0):null,heavy_aa_units:byMember.get(m.member_id)??[]}));
   const eligible = members.filter(m => m.supply_matches >= min);
   function ranking(key,samples,direction) {
     let last = null, place = 0;
@@ -86,13 +98,14 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
   const definitions=[
     {id:'hungry',title:'小馋猫罪',subtitle:'补给车一响，饭点准时到。',key:'avg_received_allies',label:'场均消耗队友补给',samples:'supply_matches',sample_label:'补给详情',direction:'desc',format:'number',icon:'utensils'},
     {id:'transport',title:'运输大队长',subtitle:'补给送到位，减刑有机会。',key:'avg_supplied_allies',label:'场均补给队友',samples:'supply_matches',sample_label:'补给详情',direction:'desc',format:'number',icon:'truck'},
-    {id:'kd',title:'交换失职罪',subtitle:'出门气势如虹，交换略显沉重。',key:'unit_kd',label:'单位 K/D',samples:'detail_matches',sample_label:'完整详情',direction:'asc',format:'ratio',icon:'arrow-right-left'},
-    {id:'kills',title:'战场摸鱼罪',subtitle:'枪声很热闹，战果很安静。',key:'avg_kills',label:'场均击毁数量',samples:'detail_matches',sample_label:'完整详情',direction:'asc',format:'number',icon:'crosshair'},
+    {id:'kd',title:'KD失职罪',subtitle:'出门气势如虹，交换略显沉重。',key:'unit_kd',label:'单位 K/D',samples:'detail_matches',sample_label:'完整详情',direction:'asc',format:'ratio',icon:'arrow-right-left'},
+    {id:'kills',title:'战场摸鱼罪',subtitle:'枪声很热闹，战果很安静。',key:'avg_destruction',label:'场均击杀分',samples:'destruction_matches',sample_label:'击杀分记录',direction:'asc',format:'number',icon:'crosshair'},
     {id:'losses',title:'白给浪费罪',subtitle:'装备刚出厂，对面就到账。',key:'avg_losses',label:'场均损失分',samples:'losses_matches',sample_label:'损失分记录',direction:'desc',format:'number',icon:'flame'},
     {id:'wins',title:'胜率拖堂罪',subtitle:'再赢一把就散庭。',key:'win_rate',label:'开黑胜率',samples:'decided',sample_label:'已知胜负',direction:'asc',format:'percent',icon:'flag'},
-    {id:'rating',title:'偷偷掉分罪',subtitle:'嘴上说上分，账户在漏风。',key:'avg_rating_delta',label:'开黑场均评分变化',samples:'rating_matches',sample_label:'评分变化记录',direction:'asc',format:'signed',icon:'trending-down'},
+    {id:'objectives',title:'占点旷工罪',subtitle:'地图那么大，偏偏绕着点走。',key:'avg_objectives',label:'场均占点',samples:'objectives_matches',sample_label:'占点记录',direction:'asc',format:'number',icon:'flag'},
+    {id:'heavy_aa',title:'防空守护者',subtitle:'天上有我罩着，地上申请减刑。',key:'heavy_aa_deployments',label:'重防部署总次数',samples:'detail_matches',sample_label:'完整详情',direction:'desc',format:'integer',icon:'shield'},
   ];
-  const charges=definitions.map(d=>({...d,group:d.id==='transport'?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
+  const charges=definitions.map(d=>({...d,group:['transport','heavy_aa'].includes(d.id)?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
   return { min_games:min,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges };
 }
 
