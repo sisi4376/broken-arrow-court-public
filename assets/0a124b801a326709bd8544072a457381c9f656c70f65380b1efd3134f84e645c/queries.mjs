@@ -84,8 +84,12 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     GROUP BY r.member_id,u.unit_id ORDER BY r.member_id,deployments DESC,u.unit_id`,...f.args);
   const byMember = new Map();
   for(const unit of heavyUnits){const list=byMember.get(unit.member_id)??[];list.push(unit);byMember.set(unit.member_id,list);}
-  const members = memberStats(store, params).map(m=>({...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,win_rate:m.decided?m.wins/m.decided:null,
-    heavy_aa_deployments:m.detail_matches?(byMember.get(m.member_id)??[]).reduce((sum,u)=>sum+u.deployments,0):null,heavy_aa_units:byMember.get(m.member_id)??[]}));
+  const members = memberStats(store, params).map(m=>{
+    const units=byMember.get(m.member_id)??[];
+    const total=m.detail_matches?units.reduce((sum,u)=>sum+u.deployments,0):null;
+    return {...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,win_rate:m.decided?m.wins/m.decided:null,
+      heavy_aa_deployments:total,avg_heavy_aa_deployments:m.detail_matches?total/m.detail_matches:null,heavy_aa_units:units};
+  });
   const eligible = members.filter(m => m.supply_matches >= min);
   function ranking(key,samples,direction) {
     let last = null, place = 0;
@@ -103,7 +107,7 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     {id:'losses',title:'白给浪费罪',subtitle:'装备刚出厂，对面就到账。',key:'avg_losses',label:'场均损失分',samples:'losses_matches',sample_label:'损失分记录',direction:'desc',format:'number',icon:'flame'},
     {id:'wins',title:'胜率拖堂罪',subtitle:'再赢一把就散庭。',key:'win_rate',label:'开黑胜率',samples:'decided',sample_label:'已知胜负',direction:'asc',format:'percent',icon:'flag'},
     {id:'objectives',title:'占点旷工罪',subtitle:'地图那么大，偏偏绕着点走。',key:'avg_objectives',label:'场均占点',samples:'objectives_matches',sample_label:'占点记录',direction:'asc',format:'number',icon:'flag'},
-    {id:'heavy_aa',title:'防空守护者',subtitle:'天上有我罩着，地上申请减刑。',key:'heavy_aa_deployments',label:'重防部署总次数',samples:'detail_matches',sample_label:'完整详情',direction:'desc',format:'integer',icon:'shield'},
+    {id:'heavy_aa',title:'防空守护者',subtitle:'天上有我罩着，地上申请减刑。',key:'avg_heavy_aa_deployments',label:'场均重防部署次数',samples:'detail_matches',sample_label:'完整详情',direction:'desc',format:'number',icon:'shield'},
   ];
   const charges=definitions.map(d=>({...d,group:['transport','heavy_aa'].includes(d.id)?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
   return { min_games:min,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges };

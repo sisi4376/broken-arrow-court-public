@@ -30,12 +30,12 @@ export function createPerformance({S,esc,icon,fmt,empty}) {
       {index:2,key,label,value:r=>r[key],first:direction},
       {index:3,key:'samples',label:sample_label,value:r=>r.sample_count},
     ]):empty(courtText('暂无达到门槛的朋友'),`至少 ${S.supplyMin} 局${sample_label}；无有效比率时不排名`,'',ico,true);
-    return `<section class="supply-ranking-section" data-charge="${esc(charge.id)}"><div class="section-heading charge-heading"><div><h3>${icon(ico)}${esc(title)}</h3><p class="charge-flavor">${esc(charge.subtitle)}</p></div><small>默认从${direction==='asc'?'少到多':'多到少'}</small></div>${content}${charge.id==='heavy_aa'?'<p class="hint section-space">累计全部重防型号的部署次数；同局重复出场、已阵亡及已退款单位均计入。</p>':''}</section>`;
+    return `<section class="supply-ranking-section" data-charge="${esc(charge.id)}"><div class="section-heading charge-heading"><div><h3>${icon(ico)}${esc(title)}</h3><p class="charge-flavor">${esc(charge.subtitle)}</p></div><small>默认从${direction==='asc'?'少到多':'多到少'}</small></div>${content}${charge.id==='heavy_aa'?'<p class="hint section-space">全部重防部署总次数 ÷ 完整详情局数，未出重防的完整对局也计入分母；同局重复出场、已阵亡及已退款单位均计入。</p>':''}</section>`;
   }
   function supplyView(data) {
     const groups=[['sentencing','判刑榜','单项证据 · 各罪分别排名'],['mitigation','减刑榜','后勤与防空 · 有功申请减刑']];
     const boards=groups.map(([id,title,description])=>`<section class="charge-group" data-charge-group="${id}" aria-label="${title}"><div class="section-heading charge-group-heading"><h2>${title}</h2><small>${description}</small></div><div class="supply-rankings">${(data.charges??[]).filter(charge=>charge.group===id).map(rankingTable).join('')}</div></section>`).join('');
-    return courtHtml`<div class="section-heading"><h2>蘸饭罪名榜</h2><small>判刑与减刑 · 分榜排名</small></div><div class="analysis-controls"><label>罪名榜最低有效局数<input id="supply-min" type="number" min="1" max="10000" step="1" value="${data.min_games}"></label><span class="hint">${data.members.length} 位朋友有参战记录；各项按自己的有效样本判断门槛</span></div><div class="charge-boards">${boards}</div><div class="notice section-space">${icon('info')}同一朋友同局多账号先合并。补给、击毁与单位 K/D 使用完整详情；K/D 为击毁单位数 / 损失单位数，0 / 0 不排名。战场摸鱼罪按场均击杀分，占点旷工罪按场均占点；损失按损失分，胜率按已知胜负。重防按所有重防型号的部署总次数排名。缺失记录不记零，有效详情省略的零值按零计入；相同数值并列。各榜名次独立，不修改蘸饭刑期的计算方式。</div>`;
+    return courtHtml`<div class="section-heading"><h2>蘸饭罪名榜</h2><small>判刑与减刑 · 分榜排名</small></div><div class="analysis-controls"><label>罪名榜最低有效局数<input id="supply-min" type="number" min="1" max="10000" step="1" value="${data.min_games}"></label><span class="hint">${data.members.length} 位朋友有参战记录；各项按自己的有效样本判断门槛</span></div><div class="charge-boards">${boards}</div><div class="notice section-space">${icon('info')}同一朋友同局多账号先合并。补给、重防部署与单位 K/D 使用完整详情；K/D 为击毁单位数 / 损失单位数，0 / 0 不排名。战场摸鱼罪按场均击杀分，占点旷工罪按场均占点；损失按损失分，胜率按已知胜负。重防按所有重防型号的场均部署次数排名。缺失记录不记零，有效详情省略的零值按零计入；相同数值并列。各榜名次独立，不修改蘸饭刑期的计算方式。</div>`;
   }
   return {performanceTabs,detailPerformance,supplyView};
 }
