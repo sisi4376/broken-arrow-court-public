@@ -1,6 +1,6 @@
 import { filters, minimumGames } from './queries.mjs';
 import { classifyAirLoadout } from './air-superiority.mjs';
-import { CONTEXT_RULES, contextualEvidence } from './court-model.mjs';
+import { CONTEXT_RULES, contextualEvidence, INDEPENDENT_RULES, independentEvidence } from './court-model.mjs';
 
 export const ZHANFAN_MODEL = {
   version: 'zhanfan-v2', prior_games: 10, raw_baseline: 40, baseline: 50, max_months: 360, life_months: 240,
@@ -60,7 +60,41 @@ export const ZHANFAN_CONTEXT_MODEL = {
     {key:'discipline',name:'友伤约束',weight:5,prior:0},
   ],
 };
-const clamp = n => Math.max(0,Math.min(100,n));
+export const ZHANFAN_INDEPENDENT_MODEL = {
+  ...ZHANFAN_CONTEXT_MODEL,version:'zhanfan-v5-independent',raw_baseline:42.5,baseline:42.5,
+  context:INDEPENDENT_RULES,
+  dimensions:[
+    {key:'pressure',name:'战斗兑现',weight:35,prior:50},
+    {key:'exchange',name:'战损交换',weight:25,prior:50},
+    {key:'dependency',name:'蹭队友补给',weight:10,prior:0},
+    {key:'victory',name:'长期胜负',weight:25,prior:50},
+    {key:'discipline',name:'友伤约束',weight:5,prior:0},
+  ],
+  benchmarks:[
+    {name:'双倍兑现与交换、60% 胜率',ratio:2,win_rate:0.6,score:25},
+    {name:'参考产出、等价交换、50% 胜率',ratio:1,win_rate:0.5,score:42.5},
+    {name:'半数兑现与交换、50% 胜率',ratio:0.5,win_rate:0.5,score:57.5},
+    {name:'四分之一兑现与交换、50% 胜率',ratio:0.25,win_rate:0.5,score:72.5},
+  ].map(b=>({...b,sentence_months:sentenceMonths(b.score)})),
+};
+export const ZHANFAN_CORE_MODEL = {
+  ...ZHANFAN_INDEPENDENT_MODEL,version:'zhanfan-v6-core',aggregation:'core-adjustments',raw_baseline:50,baseline:50,
+  dimensions:[
+    {key:'pressure',name:'战斗兑现',kind:'core',weight:60,prior:50},
+    {key:'exchange',name:'战损交换',kind:'core',weight:40,prior:50},
+    {key:'victory',name:'胜负修正',kind:'adjustment',weight:20,center:50,prior:50},
+    {key:'dependency',name:'蹭队友补给',kind:'adjustment',weight:8,center:0,prior:0},
+    {key:'discipline',name:'友伤约束',kind:'adjustment',weight:4,center:0,prior:0},
+  ],
+  benchmarks:[
+    {name:'双倍兑现与交换、60% 胜率',ratio:2,win_rate:0.6,score:23},
+    {name:'参考产出、等价交换、50% 胜率',ratio:1,win_rate:0.5,score:50},
+    {name:'半数兑现与交换、50% 胜率',ratio:0.5,win_rate:0.5,score:75},
+    {name:'四分之一兑现与交换、50% 胜率',ratio:0.25,win_rate:0.5,score:100},
+    {name:'四分之一兑现与交换、80% 胜率',ratio:0.25,win_rate:0.8,score:94},
+  ].map(b=>({...b,sentence_months:sentenceMonths(b.score)})),
+};
+function clamp(n) { return Math.max(0,Math.min(100,n)); }
 const rounded = n => Math.round(n*10)/10;
 const KEYS = {destruction:'DestructionScore',losses:'LossesScore',objectives:'ObjectivesCaptured',damage:'DamageDealt',friendly_fire:'DamageFriendlyFireDealt',supplied:'SupplyPointsConsumedByAllies',received:'SupplyPointsConsumedFromAllies',consumed:'SupplyPointsConsumed'};
 
@@ -99,6 +133,14 @@ function weighted(components, dimension=null, factor=1) {
   let sum=0,weights=0;
   for(const c of components){const w=c.weight*(c.key===dimension?factor:1);sum+=c.penalty*w;weights+=w;}
   return clamp(sum/weights);
+}
+function aggregate(components,model,dimension=null,factor=1) {
+  if(model.aggregation!=='core-adjustments')return weighted(components,dimension,factor);
+  const weight=c=>c.weight*(c.key===dimension?factor:1);
+  const core=components.filter(c=>c.kind==='core'),total=core.reduce((sum,c)=>sum+weight(c),0);
+  const base=core.reduce((sum,c)=>sum+c.penalty*weight(c),0)/total;
+  const adjustment=components.filter(c=>c.kind==='adjustment').reduce((sum,c)=>sum+(c.penalty-c.center)*weight(c)/100,0);
+  return clamp(base+adjustment);
 }
 function readMetric(p,raw,key,protobuf) {
   const field=KEYS[key];
@@ -140,6 +182,7 @@ export function performanceRatioPenalty(value,reference,buffer=0,slope=30) {
   return clamp(50-slope*(Math.log2(value+buffer)-Math.log2(reference+buffer)));
 }
 function gamePenalties(g,team,model) {
+  if(model.context?.scale==='independent')return independentEvidence(g,team,model);
   if(model.context)return contextualEvidence(g,team,model);
   const values=team.map(p=>metrics(p)),mine=metrics(g),v=g.values;
   const p=key=>percentile(mine[key],values.map(x=>x[key]));
@@ -213,6 +256,7 @@ function analyze(store,params,model) {
   if(model.context)for(const m of members.values()){
     m.skipped.no_activity=0;
     m.context={imbalanced_matches:0,exchange_matches:0,objective_relief_matches:0,specialist_relief_matches:0,contribution_sum:0,examples:[]};
+    if(model.context.scale==='independent')m.context.mode='independent';
   }
   for(const participants of games.values()){
     const match=participants[0],groups=groupedParticipants(participants);
@@ -229,13 +273,14 @@ function analyze(store,params,model) {
       if(!evaluated){m.skipped.no_activity++;continue;}
       const {penalties,support,food,evidence}=evaluated;m.scored_matches++;
       if(evidence){
-        m.context.imbalanced_matches+=Number(evidence.deficit>0);
-        m.context.exchange_matches+=Number(penalties.exchange>0);
+        m.context.imbalanced_matches+=Number(evidence.weak_combat??(evidence.deficit>0));
+        m.context.exchange_matches+=Number(evidence.weak_exchange??(penalties.exchange>0));
         m.context.objective_relief_matches+=Number(evidence.objective_relief>0);
         m.context.specialist_relief_matches+=Number(evidence.specialist_relief>0);
-        m.context.contribution_sum+=evidence.contribution;
+        m.context.contribution_sum+=evidence.contribution??(1-penalties.pressure/100);
         const points=model.dimensions.filter(d=>d.key!=='victory').reduce((sum,d)=>sum+penalties[d.key]*d.weight/100,0);
-        m.context.examples.push({match_id:match.match_id,...evidence,points});
+        m.context.examples.push({match_id:match.match_id,...evidence,points,
+          ...(model.aggregation?{core_points:model.dimensions.filter(d=>d.kind==='core').reduce((sum,d)=>sum+penalties[d.key]*d.weight/100,0)}:{})});
       }
       if(support){m.specialist.available_matches+=Number(support.available);m.specialist.unavailable_matches+=Number(!support.available);m.specialist.credited_matches+=Number(support.credit>0);m.specialist.credit_sum+=support.credit;}
       if(food){m.freeloading.dependent_matches+=Number(food.share>model.freeloading.free_share);m.freeloading.penalized_matches+=Number(food.penalty>0);m.freeloading.net_received+=food.net_received;m.freeloading.share_sum+=food.share;}
@@ -251,15 +296,21 @@ function analyze(store,params,model) {
     const components=model.dimensions.map(d=>{
       const samples=d.key==='victory'?m.outcome_matches:n,confidence=samples/(samples+model.prior_games);
       const average=samples?sums[d.key]/samples:null,penalty=n?d.prior+((average??d.prior)-d.prior)*confidence:null;
-      return {...d,samples,average,penalty,points:penalty===null?null:penalty*d.weight/100,change:penalty===null?null:(penalty-d.prior)*d.weight/100};
+      return {...d,samples,average,penalty,points:penalty===null?null:(penalty-(d.center??0))*d.weight/100,change:penalty===null?null:(penalty-d.prior)*d.weight/100};
     });
-    const raw=n?weighted(components):null,raw_score=n?Math.round(raw*100)/100:null;
+    const raw=n?aggregate(components,model):null,raw_score=n?Math.round(raw*100)/100:null;
     const score=n?rounded(calibratedScore(raw,model)):null,months=sentenceMonths(score);
-    const variants=n?[score,...components.flatMap(c=>[weighted(components,c.key,0.8),weighted(components,c.key,1.2)].map(v=>rounded(calibratedScore(v,model))))].map(sentenceMonths):[];
+    const variants=n?[score,...components.flatMap(c=>[aggregate(components,model,c.key,0.8),aggregate(components,model,c.key,1.2)].map(v=>rounded(calibratedScore(v,model))))].map(sentenceMonths):[];
+    if(model.aggregation){
+      rest.score_breakdown={core:n?components.filter(c=>c.kind==='core').reduce((sum,c)=>sum+c.points,0):null,
+        adjustments:components.filter(c=>c.kind==='adjustment').map(c=>({key:c.key,name:c.name,points:c.points})),
+        before_clamp:n?components.reduce((sum,c)=>sum+c.points,0):null,
+        ceiling_without_extras:n?clamp(50+50*reliability+components.find(c=>c.key==='victory').points):null};
+    }
     if(rest.context){
       const examples=rest.context.examples;
       rest.context={...rest.context,
-        risk_examples:examples.filter(e=>e.deficit>0).sort((a,b)=>b.points-a.points||a.match_id.localeCompare(b.match_id)).slice(0,3),
+        risk_examples:examples.filter(e=>e.risk??(e.deficit>0)).sort((a,b)=>b.points-a.points||a.match_id.localeCompare(b.match_id)).slice(0,3),
         relief_examples:examples.filter(e=>e.objective_relief>0||e.specialist_relief>0).sort((a,b)=>(b.objective_relief+b.specialist_relief)-(a.objective_relief+a.specialist_relief)||a.match_id.localeCompare(b.match_id)).slice(0,2)};
       delete rest.context.examples;
     }
@@ -274,6 +325,12 @@ function analyze(store,params,model) {
 }
 
 export function zhanfanAnalysis(store,params=new URLSearchParams()) {
+  return analyze(store,params,ZHANFAN_CORE_MODEL);
+}
+export function independentZhanfanAnalysis(store,params=new URLSearchParams()) {
+  return analyze(store,params,ZHANFAN_INDEPENDENT_MODEL);
+}
+export function contextZhanfanAnalysis(store,params=new URLSearchParams()) {
   return analyze(store,params,ZHANFAN_CONTEXT_MODEL);
 }
 export function legacyZhanfanAnalysis(store,params=new URLSearchParams()) {
@@ -303,8 +360,7 @@ export function zhanfanTrialComparison(store,params=new URLSearchParams()) {
   }};
 }
 
-export function zhanfanComparison(store,params=new URLSearchParams()) {
-  const current=zhanfanAnalysis(store,params),previous=legacyZhanfanAnalysis(store,params);
+function compareReports(current,previous) {
   return {kind:'court-model-comparison',current,previous,min_games:current.min_games,
     members:current.members.map(next=>{
       const old=previous.members.find(r=>r.member_id===next.member_id),comparable=next.eligible&&old.eligible;
@@ -312,4 +368,16 @@ export function zhanfanComparison(store,params=new URLSearchParams()) {
         delta_score:comparable?rounded(next.score-old.score):null,
         delta_months:comparable?next.sentence_months-old.sentence_months:null};
     })};
+}
+
+export function contextZhanfanComparison(store,params=new URLSearchParams()) {
+  return compareReports(contextZhanfanAnalysis(store,params),legacyZhanfanAnalysis(store,params));
+}
+
+export function zhanfanComparison(store,params=new URLSearchParams()) {
+  return compareReports(zhanfanAnalysis(store,params),independentZhanfanAnalysis(store,params));
+}
+
+export function independentZhanfanComparison(store,params=new URLSearchParams()) {
+  return compareReports(independentZhanfanAnalysis(store,params),contextZhanfanAnalysis(store,params));
 }
