@@ -85,14 +85,14 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
   }
   const definitions=[
     {id:'hungry',title:'小馋猫罪',subtitle:'补给车一响，饭点准时到。',key:'avg_received_allies',label:'场均消耗队友补给',samples:'supply_matches',sample_label:'补给详情',direction:'desc',format:'number',icon:'utensils'},
-    {id:'transport',title:'运输怠工罪',subtitle:'车钥匙在手，队友还在等油。',key:'avg_supplied_allies',label:'场均补给队友',samples:'supply_matches',sample_label:'补给详情',direction:'asc',format:'number',icon:'truck'},
+    {id:'transport',title:'运输大队长',subtitle:'补给送到位，减刑有机会。',key:'avg_supplied_allies',label:'场均补给队友',samples:'supply_matches',sample_label:'补给详情',direction:'desc',format:'number',icon:'truck'},
     {id:'kd',title:'交换失职罪',subtitle:'出门气势如虹，交换略显沉重。',key:'unit_kd',label:'单位 K/D',samples:'detail_matches',sample_label:'完整详情',direction:'asc',format:'ratio',icon:'arrow-right-left'},
     {id:'kills',title:'战场摸鱼罪',subtitle:'枪声很热闹，战果很安静。',key:'avg_kills',label:'场均击毁数量',samples:'detail_matches',sample_label:'完整详情',direction:'asc',format:'number',icon:'crosshair'},
     {id:'losses',title:'白给浪费罪',subtitle:'装备刚出厂，对面就到账。',key:'avg_losses',label:'场均损失分',samples:'losses_matches',sample_label:'损失分记录',direction:'desc',format:'number',icon:'flame'},
     {id:'wins',title:'胜率拖堂罪',subtitle:'再赢一把就散庭。',key:'win_rate',label:'开黑胜率',samples:'decided',sample_label:'已知胜负',direction:'asc',format:'percent',icon:'flag'},
     {id:'rating',title:'偷偷掉分罪',subtitle:'嘴上说上分，账户在漏风。',key:'avg_rating_delta',label:'开黑场均评分变化',samples:'rating_matches',sample_label:'评分变化记录',direction:'asc',format:'signed',icon:'trending-down'},
   ];
-  const charges=definitions.map(d=>({...d,rows:ranking(d.key,d.samples,d.direction)}));
+  const charges=definitions.map(d=>({...d,group:d.id==='transport'?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
   return { min_games:min,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges };
 }
 
