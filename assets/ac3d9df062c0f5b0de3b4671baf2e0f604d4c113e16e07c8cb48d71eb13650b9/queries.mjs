@@ -74,21 +74,39 @@ export function dashboard(store, params) {
 export function supplyAnalysis(store, params = new URLSearchParams()) {
   const min = minimumGames(params, 'supply_min_games');
   const f = filters(params);
-  // The source catalogue classifies every heavy air-defense model as role 15.
-  // Count deployments, including repeat spawns, refunds and alternate accounts.
-  const heavyUnits = store.all(`SELECT r.member_id,u.unit_id,COUNT(*) AS deployments,
+  // Classify all of a friend's units before treating an absent heavy-AA kill as zero.
+  const heavyEvidence = `WITH checked_matches AS (
+    SELECT r.member_id,r.match_id,SUM(CASE WHEN u.net_id IS NOT NULL AND (
+      c.unit_id IS NULL OR json_extract(c.data_json,'$.role') IS NULL OR
+      NOT (json_type(c.data_json,'$.role')='integer' OR (json_type(c.data_json,'$.role')='text' AND
+        json_extract(c.data_json,'$.role')!='' AND json_extract(c.data_json,'$.role') NOT GLOB '*[^0-9]*')) OR
+      typeof(u.kills) NOT IN ('integer','real') OR u.kills<0 OR u.kills>9007199254740991 OR CAST(u.kills AS INTEGER)!=u.kills
+    ) THEN 1 ELSE 0 END) AS invalid_units
+    FROM registered_participants r JOIN matches m ON m.id=r.match_id
+    LEFT JOIN unit_instances u ON u.match_id=r.match_id AND u.player_id=r.player_id
+    LEFT JOIN unit_catalogue c ON c.unit_id=u.unit_id
+    WHERE ${f.sql} AND m.detail_state='complete' GROUP BY r.member_id,r.match_id
+  ),valid_matches AS (SELECT member_id,match_id FROM checked_matches WHERE invalid_units=0)`;
+  const heavySamples = new Map(store.all(`${heavyEvidence}
+    SELECT member_id,COUNT(*) AS matches FROM valid_matches GROUP BY member_id`,...f.args).map(r=>[r.member_id,r.matches]));
+  // KilledCount is credited to the owning player, not the type of victim.
+  const heavyUnits = store.all(`${heavyEvidence}
+    SELECT r.member_id,u.unit_id,COUNT(*) AS deployments,SUM(u.kills) AS kills,
     COALESCE(json_extract(c.data_json,'$.hudName'),json_extract(c.data_json,'$.name'),u.unit_id) AS name
     FROM unit_instances u JOIN registered_participants r ON r.match_id=u.match_id AND r.player_id=u.player_id
-    JOIN matches m ON m.id=u.match_id JOIN unit_catalogue c ON c.unit_id=u.unit_id
-    WHERE ${f.sql} AND m.detail_state='complete' AND CAST(json_extract(c.data_json,'$.role') AS INTEGER)=15
-    GROUP BY r.member_id,u.unit_id ORDER BY r.member_id,deployments DESC,u.unit_id`,...f.args);
+    JOIN valid_matches v ON v.member_id=r.member_id AND v.match_id=r.match_id
+    JOIN unit_catalogue c ON c.unit_id=u.unit_id
+    WHERE CAST(json_extract(c.data_json,'$.role') AS INTEGER)=15
+    GROUP BY r.member_id,u.unit_id ORDER BY r.member_id,kills DESC,deployments DESC,u.unit_id`,...f.args);
   const byMember = new Map();
   for(const unit of heavyUnits){const list=byMember.get(unit.member_id)??[];list.push(unit);byMember.set(unit.member_id,list);}
   const members = memberStats(store, params).map(m=>{
     const units=byMember.get(m.member_id)??[];
-    const total=m.detail_matches?units.reduce((sum,u)=>sum+u.deployments,0):null;
+    const samples=heavySamples.get(m.member_id)??0;
+    const total=samples?units.reduce((sum,u)=>sum+u.kills,0):null;
     return {...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,win_rate:m.decided?m.wins/m.decided:null,
-      heavy_aa_deployments:total,avg_heavy_aa_deployments:m.detail_matches?total/m.detail_matches:null,heavy_aa_units:units};
+      heavy_aa_kills:total,avg_heavy_aa_kills:samples?total/samples:null,heavy_aa_kill_matches:samples,
+      heavy_aa_kill_excluded:m.detail_matches-samples,heavy_aa_units:units};
   });
   const eligible = members.filter(m => m.supply_matches >= min);
   function ranking(key,samples,direction) {
@@ -107,9 +125,9 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     {id:'losses',title:'白给浪费罪',subtitle:'装备刚出厂，对面就到账。',key:'avg_losses',label:'场均损失分',samples:'losses_matches',sample_label:'损失分记录',direction:'desc',format:'number',icon:'flame'},
     {id:'wins',title:'胜率拖堂罪',subtitle:'再赢一把就散庭。',key:'win_rate',label:'开黑胜率',samples:'decided',sample_label:'已知胜负',direction:'asc',format:'percent',icon:'flag'},
     {id:'objectives',title:'占点旷工罪',subtitle:'地图那么大，偏偏绕着点走。',key:'avg_objectives',label:'场均占点',samples:'objectives_matches',sample_label:'占点记录',direction:'asc',format:'number',icon:'flag'},
-    {id:'heavy_aa',title:'防空守护者',subtitle:'天上有我罩着，地上申请减刑。',key:'avg_heavy_aa_deployments',label:'场均重防部署次数',samples:'detail_matches',sample_label:'完整详情',direction:'desc',format:'number',icon:'shield'},
+    {id:'heavy_aa_kills',title:'重防赎罪榜',subtitle:'导弹打出战果，本庭酌情减刑。',key:'avg_heavy_aa_kills',label:'场均重防击杀数',samples:'heavy_aa_kill_matches',sample_label:'有效单位详情',direction:'desc',format:'number',icon:'shield'},
   ];
-  const charges=definitions.map(d=>({...d,group:['transport','heavy_aa'].includes(d.id)?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
+  const charges=definitions.map(d=>({...d,group:['transport','heavy_aa_kills'].includes(d.id)?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
   return { min_games:min,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges };
 }
 
