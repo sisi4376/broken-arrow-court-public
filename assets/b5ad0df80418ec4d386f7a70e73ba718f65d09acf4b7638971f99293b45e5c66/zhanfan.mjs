@@ -1,6 +1,6 @@
 import { filters, minimumGames } from './queries.mjs';
 import { classifyAirLoadout } from './air-superiority.mjs';
-import { CONTEXT_RULES, contextualEvidence, INDEPENDENT_RULES, independentEvidence, independentRatioPenalty } from './court-model.mjs';
+import { CONTEXT_RULES, contextualEvidence, INDEPENDENT_RULES, independentEvidence, independentRatioPenalty, STACKED_CORRECTIONS, stackedEvidence } from './court-model.mjs';
 
 export const ZHANFAN_MODEL = {
   version: 'zhanfan-v2', prior_games: 10, raw_baseline: 40, baseline: 50, max_months: 360, life_months: 240,
@@ -128,9 +128,23 @@ export const ZHANFAN_EXPANDED_MODEL={
     return {...b,raw_core,score,sentence_months:sentenceMonths(score,EXPANDED_SENTENCING)};
   }),
 };
+export const ZHANFAN_STACKED_MODEL={
+  ...ZHANFAN_EXPANDED_MODEL,version:'zhanfan-v10-stacked',stacked:true,
+  approved_trial:'stacked-20-trial-v2',
+  dimensions:[
+    ...ZHANFAN_EXPANDED_MODEL.dimensions.filter(d=>d.kind==='core'),
+    ...STACKED_CORRECTIONS.map(d=>({...d,kind:'adjustment',weight:d.key==='victory'?40:20,
+      center:d.key==='victory'?50:0,prior:d.key==='victory'?50:0,cap:20})),
+  ],
+  benchmarks:ZHANFAN_EXPANDED_MODEL.benchmarks.map(b=>{
+    const score=clamp(b.raw_core+40*(.5-b.win_rate));
+    return {...b,score,sentence_months:sentenceMonths(score,EXPANDED_SENTENCING)};
+  }),
+};
 function clamp(n) { return Math.max(0,Math.min(100,n)); }
 const rounded = n => Math.round(n*10)/10;
 const KEYS = {destruction:'DestructionScore',losses:'LossesScore',objectives:'ObjectivesCaptured',damage:'DamageDealt',friendly_fire:'DamageFriendlyFireDealt',supplied:'SupplyPointsConsumedByAllies',received:'SupplyPointsConsumedFromAllies',consumed:'SupplyPointsConsumed'};
+const COUNT_KEYS={kills:'Destruction',units_lost:'Losses'};
 
 export function calibratedScore(raw,model=ZHANFAN_MODEL) {
   if(typeof raw!=='number'||!Number.isFinite(raw))return null;
@@ -178,22 +192,29 @@ function aggregate(components,model,dimension=null,factor=1) {
   return clamp(base+adjustment);
 }
 function readMetric(p,raw,key,protobuf) {
-  const field=KEYS[key];
+  const field=KEYS[key]??COUNT_KEYS[key];
   if(Object.hasOwn(raw,field))return typeof raw[field]==='number'&&Number.isFinite(raw[field])&&raw[field]>=0&&raw[field]<=Number.MAX_SAFE_INTEGER?raw[field]:null;
   const n=p[key];
   if(typeof n==='number'&&Number.isFinite(n)&&n>=0&&n<=Number.MAX_SAFE_INTEGER)return n;
   return protobuf?0:null;
 }
-function groupedParticipants(rows) {
+function groupedParticipants(rows,stacked=false) {
+  const keys=stacked?{...KEYS,...COUNT_KEYS}:KEYS;
   const grouped=new Map();
   for(const p of rows){
     if(!/^[1-9]\d*$/.test(p.player_id)||p.team_id===100)continue;
     const key=p.member_id?`member:${p.member_id}`:`player:${p.player_id}`;
     let g=grouped.get(key);
-    if(!g){g={key,member_id:p.member_id,name:p.member_name,teams:new Set(),values:Object.fromEntries(Object.keys(KEYS).map(k=>[k,0])),valid:true};grouped.set(key,g);}
+    if(!g){g={key,member_id:p.member_id,name:p.member_name,teams:new Set(),values:Object.fromEntries(Object.keys(keys).map(k=>[k,0])),valid:true};grouped.set(key,g);}
     g.teams.add(p.team_id);
     const raw=JSON.parse(p.raw_json);
-    for(const k of Object.keys(KEYS)){const n=readMetric(p,raw,k,!!p.protobuf);if(n===null)g.valid=false;else {g.values[k]+=n;if(g.values[k]>Number.MAX_SAFE_INTEGER)g.valid=false;}}
+    for(const k of Object.keys(keys)){
+      const n=readMetric(p,raw,k,!!p.protobuf);
+      if(Object.hasOwn(COUNT_KEYS,k)){
+        g.values[k]=n===null||g.values[k]===null||g.values[k]+n>Number.MAX_SAFE_INTEGER?null:g.values[k]+n;
+      }else if(n===null)g.valid=false;
+      else {g.values[k]+=n;if(g.values[k]>Number.MAX_SAFE_INTEGER)g.valid=false;}
+    }
   }
   return [...grouped.values()].map(g=>({...g,team_id:g.teams.size===1?[...g.teams][0]:null}));
 }
@@ -217,6 +238,21 @@ export function performanceRatioPenalty(value,reference,buffer=0,slope=30) {
   return clamp(50-slope*(Math.log2(value+buffer)-Math.log2(reference+buffer)));
 }
 function gamePenalties(g,team,model) {
+  if(model.stacked){
+    const e=stackedEvidence(g,team,model);if(!e)return null;
+    const penalties={pressure:e.combat,exchange:e.exchange,
+      ...Object.fromEntries(Object.entries(e.corrections).map(([k,v])=>[k,v===null?null:v*5]))};
+    const specialistRelief=-(e.corrections.heavy??0)-(e.corrections.air??0);
+    return {penalties,
+      support:{available:e.specialist_values.length>0,credit:specialistRelief},
+      food:{share:e.supply_share,net_received:e.net_received,penalty:e.corrections.dependency},
+      evidence:{...e,combat_base:e.combat,exchange_base:e.exchange,combat_penalty:e.combat,exchange_penalty:e.exchange,
+        weak_combat:e.combat>50,weak_exchange:e.exchange>50,
+        objective_relief:-e.corrections.objectives,specialist_relief:specialistRelief,
+        risk:e.combat>50||e.exchange>50||Object.values(e.corrections).some(v=>v>0),
+        penalties},
+    };
+  }
   if(model.context?.scale==='independent')return independentEvidence(g,team,model);
   if(model.context)return contextualEvidence(g,team,model);
   const values=team.map(p=>metrics(p)),mine=metrics(g),v=g.values;
@@ -288,13 +324,14 @@ function analyze(store,params,model) {
     WHERE ${f.sql} ORDER BY CAST(p.match_id AS INTEGER),p.player_id`,...f.args);
   const games=new Map();for(const p of rows){if(!games.has(p.match_id))games.set(p.match_id,[]);games.get(p.match_id).push(p);}
   const members=new Map(store.all('SELECT id AS member_id,name FROM members WHERE active=1 ORDER BY id').map(m=>[m.member_id,{...m,matches:0,complete_matches:0,scored_matches:0,outcome_matches:0,wins:0,losses:0,skipped:{missing_detail:0,ambiguous_team:0,invalid_data:0,no_peers:0},...(model.combat?{specialist:{available_matches:0,unavailable_matches:0,credited_matches:0,credit_sum:0}}:{}),...(model.freeloading?{freeloading:{dependent_matches:0,penalized_matches:0,net_received:0,share_sum:0}}:{}),sums:Object.fromEntries(model.dimensions.map(d=>[d.key,0]))}]));
+  if(model.stacked)for(const m of members.values())m.samples_by_key=Object.fromEntries(model.dimensions.map(d=>[d.key,0]));
   if(model.context)for(const m of members.values()){
     m.skipped.no_activity=0;
     m.context={imbalanced_matches:0,exchange_matches:0,objective_relief_matches:0,specialist_relief_matches:0,contribution_sum:0,examples:[]};
     if(model.context.scale==='independent')m.context.mode='independent';
   }
   for(const participants of games.values()){
-    const match=participants[0],groups=groupedParticipants(participants);
+    const match=participants[0],groups=groupedParticipants(participants,model.stacked);
     if(units)for(const g of groups)g.unit_evidence=units.get(`${match.match_id}:${g.key}`)??{heavy:{known:true,kills:0},air:{known:true,kills:0}};
     const peers=groups.filter(g=>g.valid&&Number.isInteger(g.team_id)&&g.team_id>=0&&g.team_id!==100);
     for(const g of groups){
@@ -319,7 +356,10 @@ function analyze(store,params,model) {
       }
       if(support){m.specialist.available_matches+=Number(support.available);m.specialist.unavailable_matches+=Number(!support.available);m.specialist.credited_matches+=Number(support.credit>0);m.specialist.credit_sum+=support.credit;}
       if(food){m.freeloading.dependent_matches+=Number(food.share>model.freeloading.free_share);m.freeloading.penalized_matches+=Number(food.penalty>0);m.freeloading.net_received+=food.net_received;m.freeloading.share_sum+=food.share;}
-      for(const [key,value] of Object.entries(penalties))m.sums[key]+=value;
+      for(const [key,value] of Object.entries(penalties)){
+        if(value===null)continue;
+        m.sums[key]+=value;if(model.stacked)m.samples_by_key[key]++;
+      }
       const winner=match.winner_team;
       if(Number.isInteger(winner)&&winner>=0&&winner!==100&&participants.some(p=>p.team_id===winner)){
         const won=g.team_id===winner;m.outcome_matches++;m.wins+=Number(won);m.losses+=Number(!won);m.sums.victory+=won?0:100;
@@ -327,11 +367,11 @@ function analyze(store,params,model) {
     }
   }
   const reports=[...members.values()].map(m=>{
-    const {sums,...rest}=m,n=m.scored_matches,reliability=n/(n+model.prior_games);
+    const {sums,samples_by_key,...rest}=m,n=m.scored_matches,reliability=n/(n+model.prior_games);
     const components=model.dimensions.map(d=>{
-      const samples=d.key==='victory'?m.outcome_matches:n,confidence=samples/(samples+model.prior_games);
+      const samples=d.key==='victory'?m.outcome_matches:model.stacked?samples_by_key[d.key]:n,confidence=samples/(samples+model.prior_games);
       const average=samples?sums[d.key]/samples:null,penalty=n?d.prior+((average??d.prior)-d.prior)*confidence:null;
-      return {...d,samples,average,penalty,points:penalty===null?null:(penalty-(d.center??0))*d.weight/100,change:penalty===null?null:(penalty-d.prior)*d.weight/100};
+      return {...d,samples,...(model.stacked?{unavailable:n-samples}:{}),average,penalty,points:penalty===null?null:(penalty-(d.center??0))*d.weight/100,change:penalty===null?null:(penalty-d.prior)*d.weight/100};
     });
     const raw=n?aggregate(components,model):null,raw_score=n?Math.round(raw*100)/100:null;
     const score=n?rounded(calibratedScore(raw,model)):null,months=sentenceMonths(score,model.sentencing);
@@ -362,6 +402,9 @@ function analyze(store,params,model) {
 }
 
 export function zhanfanAnalysis(store,params=new URLSearchParams()) {
+  return analyze(store,params,ZHANFAN_STACKED_MODEL);
+}
+export function expandedZhanfanAnalysis(store,params=new URLSearchParams()) {
   return analyze(store,params,ZHANFAN_EXPANDED_MODEL);
 }
 export function signedZhanfanAnalysis(store,params=new URLSearchParams()) {
@@ -421,7 +464,11 @@ export function contextZhanfanComparison(store,params=new URLSearchParams()) {
 }
 
 export function zhanfanComparison(store,params=new URLSearchParams()) {
-  return compareReports(zhanfanAnalysis(store,params),signedZhanfanAnalysis(store,params));
+  return compareReports(zhanfanAnalysis(store,params),expandedZhanfanAnalysis(store,params));
+}
+
+export function expandedZhanfanComparison(store,params=new URLSearchParams()) {
+  return compareReports(expandedZhanfanAnalysis(store,params),signedZhanfanAnalysis(store,params));
 }
 
 export function signedZhanfanComparison(store,params=new URLSearchParams()) {

@@ -1,5 +1,42 @@
 const unit = n => Math.max(0, Math.min(1, n));
 
+export const STACKED_CORRECTIONS = [
+  {key:'victory',name:'共同胜负',direction:'signed',rule:'明确胜负独立收缩；修正=40×(收缩后失败率−0.5)，范围−20～+20。不推断个人造成输赢。'},
+  {key:'dependency',name:'净蹭队友补给',direction:'penalty',rule:'净吃比例=max(从队友补给−补给队友,0)/max(自身消耗,从队友补给,1000)；35%以内不罚，超出后20×clip((比例−35%)/65%)，独立于战斗和其他贡献，最多20。'},
+  {key:'discipline',name:'友伤约束',direction:'penalty',rule:'友伤/(伤害+友伤+50)/5%，限制0～1后乘20；不判断是否故意。'},
+  {key:'unit_kd',name:'单位损耗附加',direction:'penalty',rule:'单位K/D（击杀+1）/(损失+1)低于其他同队人均参考，且价值交换罚分高于50时才加刑；两种缺口相乘，最多20。缺少有效单位数量则不计。'},
+  {key:'objectives',name:'占点贡献',direction:'relief',rule:'20×clip((本人占点−其他队友人均)/(其他队友人均+2))；零占点不单独罚。'},
+  {key:'heavy',name:'重防战果',direction:'relief',rule:'本人重防单位总击杀相对其他队友同类人均，按占点同一公式、缓冲2计算；分类不明不算零。'},
+  {key:'air',name:'纯空优战果',direction:'relief',rule:'本人实际纯空优挂载单位总击杀，单独计算最多20；不是敌机击落数量，混合/轰炸挂载不算。'},
+  {key:'transport',name:'净补给队友',direction:'relief',rule:'20×max(补给队友−从队友补给,0)/max(自身消耗,补给队友,1000)。只抵同局，不奖励循环互送的毛额。'},
+];
+
+export function stackedEvidence(g,team,model) {
+  const original=independentEvidence(g,team,model);
+  if(!original)return null;
+  const e=original.evidence,v=g.values,others=team.filter(t=>t.key!==g.key);
+  const objectives=20*unit((v.objectives-e.references.objectives)/(e.references.objectives+2));
+  const specialist=key=>e.specialist_values.find(s=>s.kind===key)?.credit??null;
+  const heavy=specialist('heavy'),air=specialist('air');
+  const netSupplied=Math.max(0,v.supplied-v.received);
+  const transport=20*unit(netSupplied/Math.max(v.consumed,v.supplied,1000));
+  const relief=objectives+(heavy??0)+(air??0)+transport;
+  let unitKd=null,kdReference=null,kdOwn=null;
+  if(team.every(t=>['kills','units_lost'].every(k=>Number.isSafeInteger(t.values[k])&&t.values[k]>=0))){
+    const mean=key=>others.reduce((n,p)=>n+p.values[key]/others.length,0);
+    kdOwn=(v.kills+1)/(v.units_lost+1);
+    kdReference=(mean('kills')+1)/(mean('units_lost')+1);
+    unitKd=20*unit(1-kdOwn/kdReference)*unit((e.exchange_base-50)/150);
+  }
+  const corrections={dependency:20*unit((e.supply_share-.35)/.65),discipline:original.penalties.discipline*.2,
+    unit_kd:unitKd,objectives:-objectives,heavy:heavy===null?null:-heavy,air:air===null?null:-air,transport:-transport};
+  const core=e.combat_base*.6+e.exchange_base*.4;
+  return {core,combat:e.combat_base,exchange:e.exchange_base,corrections,
+    before_outcome:core+Object.values(corrections).reduce((n,v)=>n+(v??0),0),relief,
+    values:{...v},references:e.references,kd_own:kdOwn,kd_reference:kdReference,
+    specialist_values:e.specialist_values,net_supplied:netSupplied,net_received:e.net_received,supply_share:e.supply_share};
+}
+
 // Fixed policy choices, not fitted to the current friends or score distribution.
 export const CONTEXT_RULES = {
   adequate: 0.8, destruction_buffer: 500, damage_buffer: 50,

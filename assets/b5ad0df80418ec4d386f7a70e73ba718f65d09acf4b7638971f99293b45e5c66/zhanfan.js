@@ -6,7 +6,7 @@ export function createCourt({S,esc,icon,fmt,empty,readOnly=false}) {
   const flavor=r=>r.eligible?r.flavor:r.scored_matches?'战报还没凑齐，先别急着领饭勺。':r.flavor;
   const tone=r=>r.score===null?'muted':r.sentence_months===0?'positive':r.score>=55?'negative':'yellow';
   const viewModes=mode=>{if(readOnly)return '';const selected=mode==='cases'?'cases':'current';return `<div class="segmented court-view-modes" aria-label="量刑版本">${[['current','现行判决'],['cases','案例复核']].map(([key,label])=>`<button data-court-view="${key}" class="${selected===key?'active':''}" aria-pressed="${selected===key}">${label}</button>`).join('')}</div>`;};
-  const sign=n=>n===null?'—':`${n>0?'+':''}${fmt(n,1)}`;
+  const sign=(n,d=1)=>n===null?'—':`${n>0?'+':''}${fmt(n,d)}`;
   const foodPoints=r=>{const n=r.components.find(c=>c.key==='dependency')?.points;return n>0&&n<.01?'<0.01':fmt(n,2);};
   const primaryPenalty=r=>r.components.filter(c=>Number.isFinite(c.change)&&c.change>=1).sort((a,b)=>b.change-a.change)[0];
   function contextEvidence(r) {
@@ -168,6 +168,7 @@ export function createCourt({S,esc,icon,fmt,empty,readOnly=false}) {
     return courtHtml`<section class="court-panel" aria-label="个人蘸饭指数"><div class="section-heading"><h2>${icon('scale')}蘸饭指数</h2><span class="badge ${r.eligible?'yellow':'muted'}">${esc(r.status)}</span></div><div class="court-verdict-grid"><div><div class="court-sentence ${tone(r)}">${!r.scored_matches?'待取证':!r.eligible?'暂缓宣判':esc(r.sentence)}</div><p class="court-flavor">${esc(flavor(r))}</p>${r.scored_matches?`<p class="court-score">${!r.eligible?`暂估 ${esc(r.sentence)} · `:''}蘸饭指数 <b class="mono">${fmt(r.score,1)}</b> / 100 · 越高刑期越长</p><p class="hint">原始失衡罚分 ${fmt(r.raw_score,2)} / 100 · 直接作为指数，不拉伸分布</p>`:'<p class="hint">当前筛选没有可评估证据，不把未知表现判为零贡献。</p>'}<div class="court-samples"><span>可评估 <b>${r.scored_matches}</b> / ${r.matches} 局</span><span>完整详情 ${r.complete_matches} 局</span><span>上榜门槛 ${data.min_games} 局</span><span>免刑线 ${data.model.sentencing.acquittal_score} 分</span></div>${r.scored_matches?`<p class="hint">评分局胜率 ${r.win_rate===null?'—':fmt(r.win_rate,1)+'%'} · ${r.wins} 胜 ${r.losses} 负 · 胜负未知 ${r.scored_matches-r.outcome_matches} 局</p><p class="hint">个人行为证据权重 ${fmt(100*r.reliability,1)}% · 数据覆盖不是判决准确率</p><p class="hint">权重扰动范围：${months(r.sensitivity.low_months)}至 ${months(r.sensitivity.high_months)}，非置信区间</p>`:''}</div><div class="court-dimensions">${r.components.map(c=>`<div class="court-dimension"><span>${esc(c.name)}<small>${c.weight}%</small></span><div class="track"><span style="width:${c.penalty??0}%"></span></div><b class="mono">${fmt(c.points,1)}<small> / ${c.weight}</small></b></div>`).join('')}<p class="hint">分项合计为原始指数。胜负未知保留中性先验，个人行为缺少样本时保守收缩。</p></div></div>${r.scored_matches?reasons(r)+contextEvidence(r):''}${Object.values(r.skipped).some(Boolean)?`<p class="hint">未评分：缺详情 ${r.skipped.missing_detail} · 队伍不明 ${r.skipped.ambiguous_team} · 无同队参考 ${r.skipped.no_peers} · 数据异常 ${r.skipped.invalid_data} · 全队缺可见活动 ${r.skipped.no_activity}</p>`:''}<p class="hint">未记录视野、守点与战术牺牲，结果仅为基于可见数据的娱乐判决，不是已验证的真实贡献评级。</p>${rules(data.model)}</section>`;
   }
   function rankingNotice(model) {
+    if(model.stacked)return '战斗60%与交换40%组成−100～200核心；占点、重防、纯空优、净供给分别减0～20分，补给依赖、友伤、单位损耗分别加0～20分，胜负修正±20分。各项独立叠加，补给保留35%互助额度，不再乘战斗不足系数；先按有效样本收缩，最后合计截断0～100。';
     if(model.context?.score_floor<0){
       const r=model.context,anchors=[0,25,50,75,100].map(n=>50+(n-50)*r.slope/25).join('/');
       return `战斗、交换单项由旧0～100线性映射到${r.score_floor}～${r.score_cap}：旧0/25/50/75/100对应${anchors}。负分可抵扣其他项，核心按60%/40%合成，保留负分及超额到最后，合计后才截断到0～100。胜负±10、补给最多+8、友伤最多+4，样本收缩保留；不按名单拉伸。`;
@@ -178,10 +179,31 @@ export function createCourt({S,esc,icon,fmt,empty,readOnly=false}) {
     return policy+`含胜负表现 ${model.dimensions.find(d=>d.key==='victory').weight}%；`;
   }
   function coreEvidenceView(r) {
+    if(r.context.risk_examples.some(e=>e.corrections)||r.components.some(c=>c.key==='transport'))return stackedEvidenceView(r);
     const c=r.context,cap=r.score_breakdown.item_cap??100,floor=r.score_breakdown.item_floor??0,examples=[...new Map([...c.risk_examples,...c.relief_examples].map(e=>[e.match_id,e])).values()];
     return `<details class="court-trial-evidence"><summary>逐局依据与减刑记录</summary><p>战斗罚分高于中性 ${c.imbalanced_matches} / ${r.scored_matches} 局；交换罚分高于中性 ${c.exchange_matches} 局；补给加刑触发 ${r.freeloading.penalized_matches} 局。占点减刑 ${c.objective_relief_matches} 局，重防 / 空优战果减刑 ${c.specialist_relief_matches} 局。</p><p>场均净消耗队友补给 ${fmt(r.freeloading.net_received/r.scored_matches,1)}；最终补给修正 ${sign(r.components.find(c=>c.key==='dependency').points)} / +8 分。以下自动选取个人行为罚分较高的最多三局、贡献减免最多两局，不是人工标签。</p>${examples.map(e=>`<div class="court-context-example"><a href="#match/${esc(e.match_id)}">#${esc(e.match_id)}</a><span>战斗罚分 ${fmt(e.combat_base,1)} → ${fmt(e.combat_penalty,1)} · 交换罚分 ${fmt(e.exchange_base,1)} → ${fmt(e.exchange_penalty,1)}（各 ${floor}～${cap}）</span><span>核心单局 ${fmt(e.core_points,2)} / ${cap} · 补给 +${fmt(e.penalties.dependency*.08,2)} · 友伤 +${fmt(e.penalties.discipline*.04,2)}（胜负另计，汇总后收缩）</span><span>占点 / 专职信用 ${fmt(e.support_credit,1)} 点分项罚分，不叠加；核心共减 ${fmt(e.relief_points,2)} 分</span><span>摧毁 / 损失 ${fmt(e.values.destruction)} / ${fmt(e.values.losses)} · 伤害 ${fmt(e.values.damage)} · 占点 ${fmt(e.values.objectives)}</span><span>其他同队人均：摧毁 ${fmt(e.references.destruction,1)} · 伤害 ${fmt(e.references.damage,1)} · 占点 ${fmt(e.references.objectives,2)}</span><span>净吃补给 ${fmt(e.net_received)}（${fmt(e.supply_share*100,1)}%）${e.unavailable_specialists?' · 部分专职证据未知':''}</span></div>`).join('')}<p>视野、守点、威慑与牺牲未完整记录；高分只是可见证据下的娱乐严重程度，不是个人导致输赢的定论。</p></details>`;
   }
+  function stackedEvidenceView(r) {
+    const c=r.context,examples=[...new Map([...c.risk_examples,...c.relief_examples].map(e=>[e.match_id,e])).values()];
+    return `<details class="court-trial-evidence"><summary>逐局依据与减刑记录</summary><p>补给净依赖超过35%：${r.freeloading.dependent_matches} / ${r.scored_matches}局；实际触发 ${r.freeloading.penalized_matches}局。场均净消耗队友补给 ${fmt(r.freeloading.net_received/r.scored_matches,1)}；收缩后补给修正 ${sign(r.components.find(c=>c.key==='dependency').points)} / +20分。所有有效局（包括0分局）等权平均，补给不再受战斗或其他减免门槛影响。</p>${examples.map(e=>`<div class="court-context-example"><a href="#match/${esc(e.match_id)}">#${esc(e.match_id)}</a><span>战斗 ${fmt(e.combat,1)} · 交换 ${fmt(e.exchange,1)} · 核心 ${fmt(e.core,2)}</span><span>${r.components.filter(c=>c.kind==='adjustment'&&c.key!=='victory').map(c=>`${esc(c.name)} ${sign(e.corrections[c.key])}`).join(' · ')}</span><span>摧毁 / 损失 ${fmt(e.values.destruction)} / ${fmt(e.values.losses)} · 单位击杀 / 损失 ${fmt(e.values.kills)} / ${fmt(e.values.units_lost)} · 净吃补给 ${fmt(e.net_received)}（${fmt(e.supply_share*100,1)}%）</span></div>`).join('')}<p>以上为自动选取的高罚分与高减免对局，不是人工认定。净补给可能来自约定的集中保障；单位损耗与价值交换仍相关，未记录的视野、守点和牺牲也可能导致误判。</p></details>`;
+  }
+  function stackedRules(model) {
+    const r=model.context;
+    return courtHtml`<details class="court-rules"><summary>判决规则与资料 · ${esc(model.version)}</summary><div class="court-rules-body">
+      <p>朋友间自定义娱乐规则，采用已确认的叠加20分试算v2，不是官方实力评级，未经人工回放标签验证，不按当前名单或名次拉伸。</p>
+      <p>战斗、交换沿用量尺P=clamp(50−75×log₂((本人值+b)/(参考值+b)),−100,200)。战斗=摧毁罚分×60%+伤害罚分×40%，参考其他同队真人人均，缓冲b分别为500、50；交换比较本人摧毁与本人损失，b=500。基础核心=战斗×60%+交换×40%。账号按人局合并，参考排除本人、敌方、AI和观战者。</p>
+      <p>不再从战斗或交换中预扣“三项取最大值”的信用。下列修正按实际程度分别计算，独立叠加，正负只在最终合计相抵；clip限制0～1，不按榜单名次固定奖惩。</p>
+      <dl>${model.dimensions.filter(d=>d.kind==='adjustment').map(d=>`<dt>${esc(d.name)} · ${d.direction==='signed'?'−20～+20':d.direction==='relief'?'−20～0':'0～+20'}分</dt><dd>${esc(d.rule)}</dd>`).join('')}</dl>
+      <p>各局等权平均，不累计服刑。核心以n/(n+${model.prior_games})向50收缩；每项修正使用该项有效局数k，向0作k/(k+${model.prior_games})收缩。共同胜负使用明确结果，失败率=(败局+5)/(明确结果局数+10)，未知不记输。分类或单位数量未知时不补零，不丢弃其他有效证据，页面显示各项有效/缺失局数。</p>
+      <p>净蹭补给的35%额度保留，但不再乘战斗不足程度，也不提前被占点、重防、空优等贡献抵消。所有有效局（含未超线的0分局）参与均值。只抵同局净补给，不跨局抵账；高依赖也可能是队伍约定的集中保障。</p>
+      <p>裁剪前合计=核心+全部修正，保留负分和超100部分，最后截断到0～100。指数≤${model.sentencing.acquittal_score}当庭释放；月数=max(1,round(240×((指数−25)/50)<sup>1.4</sup>))，封顶360月。${model.sentencing.life_score}分起无期，低于75最多239月。无样本待取证，默认至少5局才排名；少于20局为初步判决。</p>
+      <p>单位损耗附加与价值交换仍相关，贡献叠加也可能重复奖励；专职总击杀不是敌机击落数。缺详情、无效时长、非法必要字段、队伍不明、无同队参考和全队无可见活动不评分。视野、控制时长、补给用途和战术牺牲未完整记录，结果不是个人导致输赢的定论。权重扰动仅逐项上下调整20%，核心重新归一化，修正单独调幅，不是置信区间。</p>
+      <div class="court-sentence-bands"><h3>本庭量刑小字</h3>${model.sentence_bands.map(b=>`<p><b>${esc(b.name)}</b> · ${esc(b.flavor)}</p>`).join('')}</div>
+      <p>方法参考 ${model.sources.map(s=>`<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a>`).join(' · ')}；不为本项目具体权重或刑期背书。</p>
+    </div></details>`;
+  }
   function coreRules(model) {
+    if(model.stacked)return stackedRules(model);
     const r=model.context,cap=r.score_cap??100,floor=r.score_floor??0,overcap=cap>100,signed=floor<0;
     const anchors=[4,2,1,.5,.25].map(ratio=>Math.max(floor,Math.min(cap,50-r.slope*Math.log2(ratio)))).join('、');
     const exampleCore=(20*cap+10*50)/30;
@@ -204,7 +226,7 @@ export function createCourt({S,esc,icon,fmt,empty,readOnly=false}) {
   }
   function corePanel(data) {
     const r=data.report,b=r.score_breakdown,cap=data.model.context.score_cap??100,floor=data.model.context.score_floor??0;
-    const maxPoints=c=>c.kind==='core'?c.weight*cap/100:c.key==='victory'?10:c.weight;
+    const maxPoints=c=>c.kind==='core'?c.weight*cap/100:c.cap??(c.key==='victory'?10:c.weight);
     const track=c=>{
       if(c.kind==='core'&&floor<0){
         const zero=-floor/(cap-floor)*100,value=(c.penalty??0)/(cap-floor)*100;
@@ -212,8 +234,15 @@ export function createCourt({S,esc,icon,fmt,empty,readOnly=false}) {
       }
       return `<div class="track"><span style="width:${c.points===null?0:Math.min(100,Math.abs(c.points)/maxPoints(c)*100)}%;${c.points<0?'background:var(--green)':''}"></span></div>`;
     };
-    const limit=c=>c.kind==='core'?`${c.weight}%核心 · 罚分${fmt(c.penalty,1)}/${cap}`:c.key==='victory'?'±10分':`+${c.weight}分`;
-    return courtHtml`<section class="court-panel" aria-label="个人蘸饭指数"><div class="section-heading"><h2>${icon('scale')}蘸饭指数</h2><span class="badge ${r.eligible?'yellow':'muted'}">${esc(r.status)}</span></div><div class="court-verdict-grid"><div><div class="court-sentence ${tone(r)}">${!r.scored_matches?'待取证':!r.eligible?'暂缓宣判':esc(r.sentence)}</div><p class="court-flavor">${esc(flavor(r))}</p>${r.scored_matches?`<p class="court-score">${!r.eligible?`暂估 ${esc(r.sentence)} · `:''}蘸饭指数 <b class="mono">${fmt(r.score,1)}</b> / 100 · 越高刑期越长</p><p class="hint">核心 ${fmt(b.core,2)} / ${cap} · ${b.adjustments.map(c=>`${esc(c.name)} ${sign(c.points)}`).join(' · ')} · 裁剪前 ${fmt(b.before_clamp,2)}</p><p class="hint">${floor<0?'负分与超额分均参与合计，最后才截断到0～100。':'最终指数限制在0～100；'}不按朋友名次拉伸。</p>`:'<p class="hint">没有可评估证据，不把未知表现当作零贡献。</p>'}<div class="court-samples"><span>可评估 <b>${r.scored_matches}</b> / ${r.matches} 局</span><span>完整详情 ${r.complete_matches} 局</span><span>上榜门槛 ${data.min_games} 局</span><span>免刑线${data.model.sentencing.acquittal_score}分</span><span>无期线${data.model.sentencing.life_score}分</span></div>${r.scored_matches?`<p class="hint">评分局胜率 ${r.win_rate===null?'—':fmt(r.win_rate,1)+'%'} · ${r.wins} 胜 ${r.losses} 负 · 胜负未知 ${r.scored_matches-r.outcome_matches} 局</p><p class="hint">个人证据收缩权重 ${fmt(r.reliability*100,1)}%，非判决准确率</p><p class="hint">权重扰动范围：${months(r.sensitivity.low_months)}至 ${months(r.sensitivity.high_months)}，非置信区间</p>`:''}</div><div class="court-dimensions">${r.components.map(c=>`<div class="court-dimension"><span>${esc(c.name)}<small>${limit(c)}</small></span>${track(c)}<b class="mono">${c.kind==='adjustment'?sign(c.points):fmt(c.points,1)}<small>${c.kind==='core'?' / '+maxPoints(c):'分'}</small></b></div>`).join('')}<p class="hint">两项组成${floor}～${cap}核心${floor<0?'，负分可抵扣其他项':''}，后三项直接加减；胜负未知修正为0，不当作败局。</p></div></div>${r.scored_matches?reasons(r)+contextEvidence(r):''}${Object.values(r.skipped).some(Boolean)?`<p class="hint">未评分：缺详情 ${r.skipped.missing_detail} · 队伍不明 ${r.skipped.ambiguous_team} · 无同队参考 ${r.skipped.no_peers} · 数据异常 ${r.skipped.invalid_data} · 全队缺可见活动 ${r.skipped.no_activity}</p>`:''}<p class="hint">仍是基于可见数据的娱乐规则，未完整记录视野、守点、威慑与牺牲，不是已验证的个人贡献评级。</p>${rules(data.model)}</section>`;
+    const limit=c=>c.kind==='core'?`${c.weight}%核心 · 罚分${fmt(c.penalty,1)}/${cap}`:c.cap?`${c.direction==='signed'?'±':c.direction==='relief'?'−':'+'}${c.cap}分 · ${c.samples}局${c.unavailable?' / 缺'+c.unavailable:''}`:c.key==='victory'?'±10分':`+${c.weight}分`;
+    return courtHtml`<section class="court-panel" aria-label="个人蘸饭指数"><div class="section-heading"><h2>${icon('scale')}蘸饭指数</h2><span class="badge ${r.eligible?'yellow':'muted'}">${esc(r.status)}</span></div>
+      <div class="court-verdict-grid"><div><div class="court-sentence ${tone(r)}">${!r.scored_matches?'待取证':!r.eligible?'暂缓宣判':esc(r.sentence)}</div><p class="court-flavor">${esc(flavor(r))}</p>
+      ${r.scored_matches?`<p class="court-score">${!r.eligible?`暂估 ${esc(r.sentence)} · `:''}蘸饭指数 <b class="mono">${fmt(r.score,1)}</b> / 100 · 越高刑期越长</p><p class="hint">核心 ${fmt(b.core,2)} / ${cap} · ${b.adjustments.map(c=>`${esc(c.name)} ${sign(c.points)}`).join(' · ')} · 裁剪前 ${fmt(b.before_clamp,2)}</p><p class="hint">${floor<0?'负分与超额分均参与合计，最后才截断到0～100。':'最终指数限制在0～100；'}不按朋友名次拉伸。</p>`:'<p class="hint">没有可评估证据，不把未知表现当作零贡献。</p>'}
+      <div class="court-samples"><span>可评估 <b>${r.scored_matches}</b> / ${r.matches} 局</span><span>完整详情 ${r.complete_matches} 局</span><span>上榜门槛 ${data.min_games} 局</span><span>免刑线${data.model.sentencing.acquittal_score}分</span><span>无期线${data.model.sentencing.life_score}分</span></div>
+      ${r.scored_matches?`<p class="hint">评分局胜率 ${r.win_rate===null?'—':fmt(r.win_rate,1)+'%'} · ${r.wins} 胜 ${r.losses} 负 · 胜负未知 ${r.scored_matches-r.outcome_matches} 局</p><p class="hint">个人证据收缩权重 ${fmt(r.reliability*100,1)}%，非判决准确率</p><p class="hint">权重扰动范围：${months(r.sensitivity.low_months)}至 ${months(r.sensitivity.high_months)}，非置信区间</p>`:''}</div>
+      <div class="court-dimensions">${r.components.map(c=>`<div class="court-dimension"><span>${esc(c.name)}<small>${limit(c)}</small></span>${track(c)}<b class="mono">${c.kind==='adjustment'?sign(c.points,data.model.stacked?2:1):fmt(c.points,1)}<small>${c.kind==='core'?' / '+maxPoints(c):'分'}</small></b></div>`).join('')}
+      <p class="hint">两项组成${floor}～${cap}核心${floor<0?'，负分可抵扣其他项':''}，${data.model.stacked?'其余八项独立叠加':'后三项直接加减'}；胜负未知修正为0，不当作败局。</p></div></div>
+      ${r.scored_matches?reasons(r)+contextEvidence(r):''}${Object.values(r.skipped).some(Boolean)?`<p class="hint">未评分：缺详情 ${r.skipped.missing_detail} · 队伍不明 ${r.skipped.ambiguous_team} · 无同队参考 ${r.skipped.no_peers} · 数据异常 ${r.skipped.invalid_data} · 全队缺可见活动 ${r.skipped.no_activity}</p>`:''}<p class="hint">仍是基于可见数据的娱乐规则，未完整记录视野、守点、威慑与牺牲，不是已验证的个人贡献评级。</p>${rules(data.model)}</section>`;
   }
   return {courtPanel,courtView};
 }
