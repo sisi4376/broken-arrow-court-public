@@ -71,7 +71,7 @@ dialog.match-player-modal{width:min(1280px,calc(100% - 28px));max-height:calc(10
 .match-player-units .section-heading{flex-wrap:wrap;gap:10px}
 .match-unit-viewport{max-width:100%;max-height:65dvh;overflow:auto;overscroll-behavior:contain;touch-action:pan-x pan-y;scrollbar-width:thin;cursor:grab}.match-unit-stage{position:relative}.match-unit-stage.is-scaled>.match-unit-columns{position:absolute;inset:0 auto auto 0;transform-origin:0 0}.match-unit-zoom{display:flex;align-items:center;gap:3px;margin-left:auto}.match-unit-zoom button{min-height:30px;padding:3px 8px}.match-unit-zoom output{font:11px Consolas,monospace;min-width:34px}.match-player-units .section-heading>small{flex-basis:100%}.match-unit-columns{display:grid;grid-auto-flow:column;grid-auto-columns:144px;align-items:start;gap:8px;width:max-content;max-width:none;overflow:visible;overscroll-behavior-x:contain;padding:0 2px 8px;scrollbar-width:thin;scrollbar-color:var(--muted) transparent;cursor:grab;user-select:none;touch-action:pan-x pan-y}
 .match-unit-columns:focus-visible{outline:2px solid var(--green);outline-offset:2px}
-.match-unit-columns.is-dragging,.match-unit-columns.is-dragging *{cursor:grabbing!important}
+.match-unit-viewport.is-dragging,.match-unit-viewport.is-dragging *,.match-unit-columns.is-dragging,.match-unit-columns.is-dragging *{cursor:grabbing!important}
 .match-unit-columns>section{min-width:0}
 .match-unit-columns h4{display:flex;align-items:center;justify-content:center;gap:7px;font-size:12px;font-weight:500;padding:10px 4px;margin:0 0 8px;border-bottom:1px solid var(--line)}
 .match-unit-columns h4 .lucide{width:15px;height:15px}
