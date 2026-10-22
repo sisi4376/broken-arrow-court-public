@@ -145,7 +145,7 @@ export function playerHighlights(m,playerId){
   });
 }
 
-export function createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonTree,unitName,participantDeck,closeModal,showRaw=()=>false}){
+export function createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonTree,unitName,participantDeck,closeModal,showRaw=()=>false,medals=()=>''}){
   let setupUnitZoom=()=>{};
   const sign=n=>n===null?'muted':n<0?'negative':n>0?'positive':'muted';
   const command=(label,action,attrs='')=>`<button type="button" class="match-player-back" data-action="${action}" ${attrs}>${icon('arrow-left')}${esc(label)}</button>`;
@@ -195,6 +195,7 @@ export function createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonT
     return `<div class="match-player-toolbar"><div><span class="mono">#${esc(p.player_id)}</span> · ${esc(teamName(p))} ${p.registered?badge(p.member_name,'yellow'):''}${p.team_id===m.winner_team?badge('胜利'):''}</div>
       <label>本局玩家<select data-match-player-select aria-label="本局玩家">${m.participants.map(x=>`<option value="${esc(x.player_id)}" ${x.player_id===p.player_id?'selected':''}>${esc(x.name)} · ${esc(teamName(x))}</option>`).join('')}</select></label>${registered}</div>
       <p class="hint">${esc(m.map_name??'')} · 对局 #${esc(m.id)} · 本局数据${m.detail_state==='complete'?'':' · 详情尚未归档'}</p>
+      ${medals(p)}
       <div class="match-player-summary">${summary.map(([label,value,note],i)=>`<div><span>${label}</span><strong class="mono ${i===3?sign(rating):''}">${value}</strong><small>${note}</small></div>`).join('')}</div>
       ${highlights(m,p)}
       <div class="match-player-sections">
@@ -245,6 +246,7 @@ export function createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonT
     });
     document.addEventListener('change',e=>{if(e.target.matches('[data-match-player-select]'))open(e.target.value);});
     document.addEventListener('error',e=>{if(e.target.matches?.('img[data-unit-icon]')){const fallback=e.target.dataset.unitFallback;if(fallback){delete e.target.dataset.unitFallback;e.target.src=fallback;}else e.target.hidden=true;}},true);
+    document.addEventListener('error',e=>{if(e.target.matches?.('img[data-medal-icon]'))e.target.hidden=true;},true);
     window.addEventListener('hashchange',()=>{if(document.querySelector('#modal').classList.contains('match-player-modal'))closeModal();});
   }
   return {view,unitView,highlights,open,install};

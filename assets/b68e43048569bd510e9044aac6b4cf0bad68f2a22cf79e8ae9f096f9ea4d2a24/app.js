@@ -6,6 +6,7 @@ import { createPerformance } from './performance.js';
 import { createCourt } from './zhanfan.js';
 import { createMatchPlayers } from './match-player.js';
 import { matchGameVersion } from './match-version.js';
+import {renderMedals} from './medals.js';
 
 const TITLE = '断剑蘸饭审判法庭';
 const READ_ONLY = !!window.COURT_READONLY;
@@ -35,6 +36,7 @@ const signedClass = (n) => n>0?'positive':n<0?'negative':'muted';
 const button = (label,action,ico='',cls='',attrs='') => (READ_ONLY&&!READ_ACTIONS.has(action)||RAW_ACTIONS.has(action)&&!isAdmin())?'':`<button type="button" class="${cls}" data-action="${action}" ${attrs}>${ico?icon(ico):''}${esc(label)}</button>`;
 const iconButton = (label,action,ico,attrs='') => (READ_ONLY&&!READ_ACTIONS.has(action)||RAW_ACTIONS.has(action)&&!isAdmin())?'':`<button type="button" class="icon-button" title="${esc(label)}" aria-label="${esc(label)}" data-action="${action}" ${attrs}>${icon(ico)}</button>`;
 const badge = (text,cls='') => `<span class="badge ${cls}">${esc(text)}</span>`;
+const playerMedals=p=>renderMedals(p.raw?.Medals,{esc,icon});
 function accountSyncBadge(a) {
   if(READ_ONLY)return badge(`${fmt(a.archived_count)} 局开黑`,'muted');
   const note = a.last_error || (a.history_missing_count ? `近期同步正常；${a.history_missing_count} 条历史比赛数据上游暂未返回，已保留 ID 并定期复查。已归档数据不受影响。` : '');
@@ -165,7 +167,7 @@ function detailContent(m){
       return `<section class="battle-team"><div class="team-heading team-${team}"><span class="dot"></span><h3>${team===100?'观战者':`队伍 ${team===0?'A':team===1?'B':team??'未知'}`}</h3>${team===m.winner_team?badge('胜利'):''}</div>
         <div class="table-wrap"><table class="battle-table"><thead><tr><th>玩家</th><th class="numeric">评分变化</th><th class="numeric">分数交换比</th>${RAW_COLUMNS[S.battleMode].map(([,n])=>`<th class="numeric">${n}</th>`).join('')}<th>高光单位</th>${isAdmin()?'<th></th>':''}</tr></thead>
         <tbody>${players.map(p=>`<tr><td><button type="button" class="text-button match-player-link ${p.registered?'registered-name':'table-title'}" data-action="match-player" data-id="${esc(p.player_id)}" aria-label="查看 ${esc(p.name)} 的本局详情"><span class="match-player-name" title="${esc(p.name)}">${esc(p.name)}</span>${icon('panel-top-open')}</button>
-          <div class="battle-player-meta">${p.registered?`<a class="player-chip" href="#friend/${p.member_id}" title="${esc(p.member_name)}">${esc(p.member_name)}</a>`:''}<span class="mono">#${esc(p.player_id)}</span></div>${participantDeck(p)}</td>
+          <div class="battle-player-meta">${p.registered?`<a class="player-chip" href="#friend/${p.member_id}" title="${esc(p.member_name)}">${esc(p.member_name)}</a>`:''}<span class="mono">#${esc(p.player_id)}</span></div>${participantDeck(p)}${playerMedals(p)}</td>
           <td class="numeric mono ${signedClass(p.rating_delta)}">${delta(p.rating_delta)}</td><td class="numeric mono">${ratio(p.destruction,p.losses)}</td>${RAW_COLUMNS[S.battleMode].map(([key])=>`<td class="numeric mono">${fmt(playerValue(p,key,m))}</td>`).join('')}<td class="team-highlights-cell">${matchPlayers.highlights(m,p,{compact:true})||'<span class="muted">—</span>'}</td>${isAdmin()?`<td>${iconButton('全部玩家字段','player-fields','list-tree',`data-id="${esc(p.player_id)}"`)}</td>`:''}</tr>`).join('')}</tbody></table></div></section>`;
     }).join('')}`;
 }
@@ -209,7 +211,7 @@ document.addEventListener('click',async event=>{
 if(READ_ONLY)setInterval(async()=>{if(document.hidden)return;try{if(await window.COURT_READONLY_API.hasUpdate()){if(!S.updateAvailable)toast('有新的对局数据，点击刷新加载');S.updateAvailable=true;updateSyncIndicator();}}catch{}},60000);
 const {courtPanel,courtView}=createCourt({S,esc,icon,fmt,empty,readOnly:READ_ONLY});
 const {friendView,deepAnalytics,participantDeck}=createAnalysis({S,esc,icon,fmt,pct,ratio,delta,signedClass,badge,empty,kpi,heading,filterBar,time,mode,unitName,canManage,button,footer,modal,toast,api,closeModal,route,icons,$,courtPanel});
-const matchPlayers=createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonTree,unitName,participantDeck,closeModal,showRaw:isAdmin});
+const matchPlayers=createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonTree,unitName,participantDeck,closeModal,showRaw:isAdmin,medals:playerMedals});
 matchPlayers.install();
 const {performanceTabs,detailPerformance,supplyView}=createPerformance({S,esc,icon,fmt,empty});
 
