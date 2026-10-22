@@ -3,6 +3,7 @@ import { resolveUnitIcon,resolveUnitName } from './unit-icons.mjs';
 import { airSuperiorityStats } from './air-superiority.mjs';
 import { resolveUnitLoadout } from './unit-loadouts.mjs';
 import { matchPriceCatalogue } from './match-prices.mjs';
+import {unitDisplayCatalogue,displayUnit} from './unit-display-catalogue.mjs';
 
 // Complete protobuf detail omits zero-valued scalars; missing detail is not zero.
 const DETAIL_METRICS = {
@@ -94,8 +95,12 @@ export function dashboard(store, params) {
 export function supplyAnalysis(store, params = new URLSearchParams()) {
   const min = minimumGames(params, 'supply_min_games');
   const f = filters(params);
+  const display=unitDisplayCatalogue(store),catalogueArgs=[JSON.stringify(display.units),...f.args];
   // Classify all of a friend's units before treating an absent heavy-AA kill as zero.
-  const heavyEvidence = `WITH checked_matches AS (
+  const heavyEvidence = `WITH display_catalogue AS (SELECT key AS unit_id,value AS data_json FROM json_each(?)),
+  effective_catalogue AS (SELECT unit_id,data_json FROM unit_catalogue UNION ALL
+    SELECT d.unit_id,d.data_json FROM display_catalogue d WHERE NOT EXISTS(SELECT 1 FROM unit_catalogue c WHERE c.unit_id=d.unit_id)),
+  checked_matches AS (
     SELECT r.member_id,r.match_id,SUM(CASE WHEN u.net_id IS NOT NULL AND (
       c.unit_id IS NULL OR json_extract(c.data_json,'$.role') IS NULL OR
       NOT (json_type(c.data_json,'$.role')='integer' OR (json_type(c.data_json,'$.role')='text' AND
@@ -104,20 +109,20 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     ) THEN 1 ELSE 0 END) AS invalid_units
     FROM registered_participants r JOIN matches m ON m.id=r.match_id
     LEFT JOIN unit_instances u ON u.match_id=r.match_id AND u.player_id=r.player_id
-    LEFT JOIN unit_catalogue c ON c.unit_id=u.unit_id
+    LEFT JOIN effective_catalogue c ON c.unit_id=u.unit_id
     WHERE ${f.sql} AND m.detail_state='complete' GROUP BY r.member_id,r.match_id
   ),valid_matches AS (SELECT member_id,match_id FROM checked_matches WHERE invalid_units=0)`;
   const heavySamples = new Map(store.all(`${heavyEvidence}
-    SELECT member_id,COUNT(*) AS matches FROM valid_matches GROUP BY member_id`,...f.args).map(r=>[r.member_id,r.matches]));
+    SELECT member_id,COUNT(*) AS matches FROM valid_matches GROUP BY member_id`,...catalogueArgs).map(r=>[r.member_id,r.matches]));
   // KilledCount is credited to the owning player, not the type of victim.
   const heavyUnits = store.all(`${heavyEvidence}
     SELECT r.member_id,u.unit_id,COUNT(*) AS deployments,SUM(u.kills) AS kills,
     COALESCE(json_extract(c.data_json,'$.hudName'),json_extract(c.data_json,'$.name'),u.unit_id) AS name
     FROM unit_instances u JOIN registered_participants r ON r.match_id=u.match_id AND r.player_id=u.player_id
     JOIN valid_matches v ON v.member_id=r.member_id AND v.match_id=r.match_id
-    JOIN unit_catalogue c ON c.unit_id=u.unit_id
+    JOIN effective_catalogue c ON c.unit_id=u.unit_id
     WHERE CAST(json_extract(c.data_json,'$.role') AS INTEGER)=15
-    GROUP BY r.member_id,u.unit_id ORDER BY r.member_id,kills DESC,deployments DESC,u.unit_id`,...f.args);
+    GROUP BY r.member_id,u.unit_id ORDER BY r.member_id,kills DESC,deployments DESC,u.unit_id`,...catalogueArgs).map(u=>({...u,name:display.units[u.unit_id]?.hudName??u.name}));
   const byMember = new Map();
   for(const unit of heavyUnits){const list=byMember.get(unit.member_id)??[];list.push(unit);byMember.set(unit.member_id,list);}
   const air=airSuperiorityStats(store,f);
@@ -200,9 +205,10 @@ export function matchDetail(store, id) {
 }
 
 export function unitStats(store, params) {
+  const display=unitDisplayCatalogue(store);
   const f = filters(params);
   const extra = /^\d+$/.test(params.get('unit_member') ?? '') ? ' AND r.member_id=?' : '';
   const args = [...f.args, ...(extra ? [Number(params.get('unit_member'))] : [])];
   return store.all(`SELECT u.unit_id,COUNT(*) AS instances,COUNT(DISTINCT u.match_id) AS matches,SUM(u.kills) AS kills,SUM(u.damage) AS damage,SUM(u.damage_received) AS damage_received,SUM(u.supply) AS supply,SUM(u.refunded) AS refunded,SUM(u.death_time IS NOT NULL) AS deaths,c.data_json AS catalogue_json
-    FROM unit_instances u JOIN registered_participants r ON r.match_id=u.match_id AND r.player_id=u.player_id JOIN matches m ON m.id=u.match_id LEFT JOIN unit_catalogue c ON c.unit_id=u.unit_id WHERE ${f.sql}${extra} GROUP BY u.unit_id ORDER BY damage DESC LIMIT 300`, ...args).map((u) => ({ ...u, catalogue: u.catalogue_json ? JSON.parse(u.catalogue_json) : null, catalogue_json: undefined }));
+    FROM unit_instances u JOIN registered_participants r ON r.match_id=u.match_id AND r.player_id=u.player_id JOIN matches m ON m.id=u.match_id LEFT JOIN unit_catalogue c ON c.unit_id=u.unit_id WHERE ${f.sql}${extra} GROUP BY u.unit_id ORDER BY damage DESC LIMIT 300`, ...args).map((u) => ({ ...u, catalogue: displayUnit(display,u.unit_id,u.catalogue_json ? JSON.parse(u.catalogue_json) : null), catalogue_json: undefined }));
 }

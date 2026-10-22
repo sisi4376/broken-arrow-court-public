@@ -176,9 +176,9 @@ export function createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonT
       <span class="match-unit-options">${loadoutNames(g)}</span>
     </button>`;
   }
-  function highlights(m,p){
+  function highlights(m,p,{compact=false}={}){
     if(!m.units?.some(u=>String(u.player_id)===String(p.player_id)))return '';
-    return `<section class="match-player-highlights" aria-label="本局高光单位">${playerHighlights(m,p.player_id).map(({key,best})=>{
+    return `<section class="match-player-highlights${compact?' team-unit-highlights':''}" aria-label="${esc(p.name)} 的本局高光单位">${playerHighlights(m,p.player_id).map(({key,best})=>{
       const label=key==='damage'?'伤害最高':'击杀最多';
       if(!best)return `<div class="match-highlight match-highlight-empty"><span>${label}</span><strong>暂无战果</strong></div>`;
       const {group:g,unit:u,index,value}=best,name=u.display_name||unitName(u.catalogue,u.unit_id),base=unitIconURL(u.catalogue),url=unitIconURL({thumbnailFileName:u.icon})??base;
@@ -247,6 +247,6 @@ export function createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonT
     document.addEventListener('error',e=>{if(e.target.matches?.('img[data-unit-icon]')){const fallback=e.target.dataset.unitFallback;if(fallback){delete e.target.dataset.unitFallback;e.target.src=fallback;}else e.target.hidden=true;}},true);
     window.addEventListener('hashchange',()=>{if(document.querySelector('#modal').classList.contains('match-player-modal'))closeModal();});
   }
-  return {view,unitView,open,install};
+  return {view,unitView,highlights,open,install};
 }
 

@@ -1,3 +1,5 @@
+import {matchPriceCatalogue} from './match-prices.mjs';
+
 export const AIR_MODEL_VERSION='air-superiority-v1';
 const integer=n=>Number.isSafeInteger(n)&&n>=0;
 const planeRole=n=>Number.isInteger(Number(n))&&Number(n)>=160&&Number(n)<=164;
@@ -41,7 +43,11 @@ export function publicAirModel(model) {
       turrets:Object.fromEntries(Object.entries(u.turrets??{}).map(([id,t])=>[id,{types:t.types,valid:t.valid}])),
       modifications:(u.modifications??[]).map(m=>({id:m.id,name:m.name,options:m.options.map(o=>({id:o.id,name:o.name,slots:o.slots,replace_unit_id:o.replace_unit_id}))}))};
   }
-  return {version:model?.version??AIR_MODEL_VERSION,db_file:model?.db_file??null,version_id:model?.version_id??null,updated_at:model?.updated_at??null,units};
+  return {version:model?.version??AIR_MODEL_VERSION,db_file:model?.db_file??null,version_id:model?.version_id??null,updated_at:model?.updated_at??null,units,
+    ...(model?.version_name?{version_name:model.version_name}:{}),
+    ...(Number.isFinite(model?.valid_from)?{valid_from:model.valid_from}:{}),...(Number.isFinite(model?.valid_until)?{valid_until:model.valid_until}:{}),
+    ...(model?.roles?{roles:Object.fromEntries(Object.entries(model.roles).filter(([id,role])=>/^\d+$/.test(id)&&integer(role)))}:{}),
+    ...(model?.catalogues?{catalogues:model.catalogues.map(c=>publicAirModel(c))}:{})};
 }
 
 export function classifyAirLoadout(raw,unit) {
@@ -81,7 +87,10 @@ export function airSuperiorityStats(store,f) {
   const row=store.get("SELECT data_json FROM analysis_catalogue WHERE key='air_superiority_model'");
   const model=row?JSON.parse(row.data_json):{version:AIR_MODEL_VERSION,units:{}};
   const games=new Map();
-  for(const r of store.all(`SELECT DISTINCT r.member_id,r.match_id FROM registered_participants r JOIN matches m ON m.id=r.match_id WHERE ${f.sql} AND m.detail_state='complete'`,...f.args))games.set(`${r.member_id}:${r.match_id}`,{...r,unknown:false,units:[]});
+  for(const r of store.all(`SELECT DISTINCT r.member_id,r.match_id,m.end_time,m.duration FROM registered_participants r JOIN matches m ON m.id=r.match_id WHERE ${f.sql} AND m.detail_state='complete'`,...f.args)){
+    const selected=matchPriceCatalogue({price_catalogues:model.catalogues},{start:typeof r.end_time==='number'&&r.duration>0?r.end_time-r.duration:null,end:r.end_time});
+    games.set(`${r.member_id}:${r.match_id}`,{...r,catalogue:selected===undefined?model:selected,unknown:false,units:[]});
+  }
   const rows=store.all(`SELECT r.member_id,u.match_id,u.unit_id,u.kills,u.raw_json,c.data_json AS catalogue_json
     FROM unit_instances u JOIN registered_participants r ON r.match_id=u.match_id AND r.player_id=u.player_id
     JOIN matches m ON m.id=u.match_id LEFT JOIN unit_catalogue c ON c.unit_id=u.unit_id
@@ -89,17 +98,18 @@ export function airSuperiorityStats(store,f) {
   const unknownReasons={},evaluations=new Map();
   for(const r of rows){
     const g=games.get(`${r.member_id}:${r.match_id}`),c=r.catalogue_json?JSON.parse(r.catalogue_json):null;
-    let result;
-    if(!['number','string'].includes(typeof c?.role)||!integer(Number(c.role))||(typeof c.role==='string'&&!/^\d+$/.test(c.role)))result={status:'unknown',reason:'unknown_unit_role'};
-    else if(!planeRole(c.role))continue;
+    let result;const role=g.catalogue?.roles?.[r.unit_id]??c?.role;
+    if(!['number','string'].includes(typeof role)||!integer(Number(role))||(typeof role==='string'&&!/^\d+$/.test(role)))result={status:'unknown',reason:'unknown_unit_role'};
+    else if(!planeRole(role))continue;
+    else if(!g.catalogue)result={status:'unknown',reason:'match_version_unknown'};
     else {
-      const raw=JSON.parse(r.raw_json),key=r.unit_id+':'+JSON.stringify(raw.OptionIds);
+      const raw=JSON.parse(r.raw_json),key=g.catalogue.db_file+':'+r.unit_id+':'+JSON.stringify(raw.OptionIds);
       result=evaluations.get(key);
-      if(!result){result=classifyAirLoadout(raw,model.units[r.unit_id]);evaluations.set(key,result);}
+      if(!result){result=classifyAirLoadout(raw,g.catalogue.units[r.unit_id]);evaluations.set(key,result);}
     }
     if(result.status==='eligible'&&!integer(r.kills))result={status:'unknown',reason:'invalid_kills'};
     if(result.status==='unknown'){g.unknown=true;unknownReasons[result.reason]=(unknownReasons[result.reason]??0)+1;continue;}
-    if(result.status==='eligible')g.units.push({unit_id:r.unit_id,name:model.units[r.unit_id].name,kills:r.kills,...result});
+    if(result.status==='eligible')g.units.push({unit_id:r.unit_id,name:g.catalogue.units[r.unit_id].name,catalogue_version:g.catalogue.version_name,kills:r.kills,...result});
   }
   const members=new Map();
   for(const g of games.values()){
@@ -107,13 +117,14 @@ export function airSuperiorityStats(store,f) {
     if(!m){m={matches:0,excluded:0,kills:0,units:new Map()};members.set(g.member_id,m);}
     if(g.unknown){m.excluded++;continue;}m.matches++;
     for(const u of g.units){
-      m.kills+=u.kills;const key=`${u.unit_id}:${u.option_ids.join(',')}`;
+      m.kills+=u.kills;const key=`${u.catalogue_version??''}:${u.unit_id}:${u.option_ids.join(',')}`;
       let total=m.units.get(key);
-      if(!total){total={unit_id:u.unit_id,name:u.name,option_ids:u.option_ids,loadout:u.loadout,kills:0,deployments:0};m.units.set(key,total);}
+      if(!total){total={unit_id:u.unit_id,name:u.name,catalogue_version:u.catalogue_version,option_ids:u.option_ids,loadout:u.loadout,kills:0,deployments:0};m.units.set(key,total);}
       total.kills+=u.kills;total.deployments++;
     }
   }
-  return {model:{version:model.version,updated_at:model.updated_at??null,db_file:model.db_file??null,units:Object.keys(model.units).length,unknown_units:unknownReasons},members};
+  return {model:{version:model.version,updated_at:model.updated_at??null,db_file:model.db_file??null,units:Object.keys(model.units).length,unknown_units:unknownReasons,
+    ...(model.catalogues?{catalogues:model.catalogues.map(c=>({version_name:c.version_name,db_file:c.db_file,valid_from:c.valid_from??null,valid_until:c.valid_until??null,units:Object.keys(c.units).length}))}:{})},members};
 }
 
 export async function updateAirCatalogue(store,source,{force=false,allowed=()=>true,onProgress=()=>{}}={}) {
@@ -126,7 +137,7 @@ export async function updateAirCatalogue(store,source,{force=false,allowed=()=>t
   if(!force&&model.last_error_at&&Date.now()-Date.parse(model.last_error_at)<3600000)return {updated:0,total:Object.keys(model.units).length};
   const version=await source.read('/api/dek/db-version');
   if(typeof version.dbFileName!=='string'||!version.dbFileName)throw new Error('飞机目录版本信息缺失');
-  if(model.db_file&&model.db_file!==version.dbFileName){model={version:AIR_MODEL_VERSION,units:{}};needed=ids;}
+  if(model.db_file&&model.db_file!==version.dbFileName){model={version:AIR_MODEL_VERSION,units:{},...(model.catalogues?{catalogues:model.catalogues}:{})};needed=ids;}
   model={...model,db_file:version.dbFileName,version_id:version.versionId??null,last_attempt:new Date().toISOString()};
   let updated=0;
   try {
@@ -147,3 +158,4 @@ export async function updateAirCatalogue(store,source,{force=false,allowed=()=>t
   }
   return {updated,total:Object.keys(model.units).length};
 }
+

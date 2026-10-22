@@ -161,10 +161,10 @@ function detailContent(m){
     ${[...new Set(m.participants.map(p=>p.team_id))].sort((a,b)=>a-b).map(team=>{
       const players=m.participants.filter(p=>p.team_id===team);
       return `<section style="margin-bottom:22px"><div class="team-heading team-${team}"><span class="dot"></span><h3>${team===100?'观战者':`队伍 ${team===0?'A':team===1?'B':team??'未知'}`}</h3>${team===m.winner_team?badge('胜利'):''}</div>
-        <div class="table-wrap"><table class="battle-table"><thead><tr><th>玩家</th><th class="numeric">评分变化</th><th class="numeric">分数交换比</th>${RAW_COLUMNS[S.battleMode].map(([,n])=>`<th class="numeric">${n}</th>`).join('')}<th></th></tr></thead>
+        <div class="table-wrap"><table class="battle-table"><thead><tr><th>玩家</th><th class="numeric">评分变化</th><th class="numeric">分数交换比</th>${RAW_COLUMNS[S.battleMode].map(([,n])=>`<th class="numeric">${n}</th>`).join('')}<th>高光单位</th><th></th></tr></thead>
         <tbody>${players.map(p=>`<tr><td><button type="button" class="text-button match-player-link ${p.registered?'registered-name':'table-title'}" data-action="match-player" data-id="${esc(p.player_id)}" aria-label="查看 ${esc(p.name)} 的本局详情">${esc(p.name)}${icon('panel-top-open')}</button>
           ${p.registered?`<a class="player-chip" href="#friend/${p.member_id}" title="${esc(courtText('查看朋友档案'))}">${esc(p.member_name)}</a>`:''}<div class="table-sub mono">#${esc(p.player_id)}</div>${participantDeck(p)}</td>
-          <td class="numeric mono ${signedClass(p.rating_delta)}">${delta(p.rating_delta)}</td><td class="numeric mono">${ratio(p.destruction,p.losses)}</td>${RAW_COLUMNS[S.battleMode].map(([key])=>`<td class="numeric mono">${fmt(playerValue(p,key,m))}</td>`).join('')}<td>${iconButton('全部玩家字段','player-fields','list-tree',`data-id="${esc(p.player_id)}"`)}</td></tr>`).join('')}</tbody></table></div></section>`;
+          <td class="numeric mono ${signedClass(p.rating_delta)}">${delta(p.rating_delta)}</td><td class="numeric mono">${ratio(p.destruction,p.losses)}</td>${RAW_COLUMNS[S.battleMode].map(([key])=>`<td class="numeric mono">${fmt(playerValue(p,key,m))}</td>`).join('')}<td class="team-highlights-cell">${matchPlayers.highlights(m,p,{compact:true})||'<span class="muted">—</span>'}</td><td>${iconButton('全部玩家字段','player-fields','list-tree',`data-id="${esc(p.player_id)}"`)}</td></tr>`).join('')}</tbody></table></div></section>`;
     }).join('')}`;
 }
 const unitInstanceName=u=>u.display_name||unitName(u.catalogue,u.unit_id);
@@ -207,7 +207,8 @@ document.addEventListener('click',async event=>{
 if(READ_ONLY)setInterval(async()=>{if(document.hidden)return;try{if(await window.COURT_READONLY_API.hasUpdate()){if(!S.updateAvailable)toast('有新的对局数据，点击刷新加载');S.updateAvailable=true;updateSyncIndicator();}}catch{}},60000);
 const {courtPanel,courtView}=createCourt({S,esc,icon,fmt,empty,readOnly:READ_ONLY});
 const {friendView,deepAnalytics,participantDeck}=createAnalysis({S,esc,icon,fmt,pct,ratio,delta,signedClass,badge,empty,kpi,heading,filterBar,time,mode,unitName,canManage,button,footer,modal,toast,api,closeModal,route,icons,$,courtPanel});
-createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonTree,unitName,participantDeck,closeModal}).install();
+const matchPlayers=createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonTree,unitName,participantDeck,closeModal});
+matchPlayers.install();
 const {performanceTabs,detailPerformance,supplyView}=createPerformance({S,esc,icon,fmt,empty});
 
 document.addEventListener('click',async event=>{
