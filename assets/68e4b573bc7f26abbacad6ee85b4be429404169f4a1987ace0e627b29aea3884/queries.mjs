@@ -4,6 +4,7 @@ import { airSuperiorityStats } from './air-superiority.mjs';
 import { resolveUnitLoadout } from './unit-loadouts.mjs';
 import { matchPriceCatalogue } from './match-prices.mjs';
 import {unitDisplayCatalogue,displayUnit} from './unit-display-catalogue.mjs';
+import { selfDestructionStats, SELF_CONFIRMED_SQL } from './self-destruction.mjs';
 
 // Complete protobuf detail omits zero-valued scalars; missing detail is not zero.
 const DETAIL_METRICS = {
@@ -126,22 +127,7 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
   const byMember = new Map();
   for(const unit of heavyUnits){const list=byMember.get(unit.member_id)??[];list.push(unit);byMember.set(unit.member_id,list);}
   const air=airSuperiorityStats(store,f);
-  const selfDestruction=new Map();
-  const selfRows=store.all(`SELECT r.member_id,r.match_id,m.end_time,m.map_id,
-    SUM(CASE WHEN u.net_id IS NOT NULL AND json_type(u.raw_json,'$.SelfDestruction') IS NOT NULL
-      AND json_type(u.raw_json,'$.SelfDestruction') NOT IN ('true','false') THEN 1 ELSE 0 END) AS invalid_units,
-    SUM(CASE WHEN u.refunded=0 AND json_type(u.raw_json,'$.SelfDestruction')='true' THEN 1 ELSE 0 END) AS self_destructions
-    FROM registered_participants r JOIN matches m ON m.id=r.match_id
-    LEFT JOIN unit_instances u ON u.match_id=r.match_id AND u.player_id=r.player_id
-    WHERE ${f.sql} AND m.detail_state='complete' GROUP BY r.member_id,r.match_id
-    ORDER BY m.end_time DESC,r.match_id DESC`,...f.args);
-  for(const row of selfRows){
-    let entry=selfDestruction.get(row.member_id);
-    if(!entry){entry={samples:0,total:0,excluded:0,cases:[]};selfDestruction.set(row.member_id,entry);}
-    if(row.invalid_units){entry.excluded++;continue;}
-    entry.samples++;entry.total+=row.self_destructions;
-    if(row.self_destructions)entry.cases.push({match_id:row.match_id,end_time:row.end_time,map_name:mapName(row.map_id),count:row.self_destructions});
-  }
+  const selfModel=selfDestructionStats(store,f),selfDestruction=selfModel.members;
   const members = memberStats(store, params).map(m=>{
     const units=byMember.get(m.member_id)??[];
     const samples=heavySamples.get(m.member_id)??0;
@@ -149,8 +135,9 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     const a=air.members.get(m.member_id),airSamples=a?.matches??0;
     const self=selfDestruction.get(m.member_id),selfSamples=self?.samples??0;
     return {...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,win_rate:m.decided?m.wins/m.decided:null,
-      self_destructions:selfSamples?self.total:null,avg_self_destructions:selfSamples?self.total/selfSamples:null,
-      self_destruction_samples:selfSamples,self_destruction_excluded:self?.excluded??0,self_destruction_cases:self?.cases??[],
+      self_destructions:self?.total??null,avg_self_destructions:selfSamples?self.ranked/selfSamples:null,
+      self_destructions_ranked:self?.ranked??0,self_destruction_compatible:self?.compatible??0,
+      self_destruction_samples:selfSamples,self_destruction_excluded:self?.excluded??0,self_destruction_cases:self?.cases??[],self_destruction_unknown_cases:self?.unknown??[],
       heavy_aa_kills:total,avg_heavy_aa_kills:samples?total/samples:null,heavy_aa_kill_matches:samples,
       heavy_aa_kill_excluded:m.detail_matches-samples,heavy_aa_units:units,
       air_superiority_kills:airSamples?a.kills:null,avg_air_superiority_kills:airSamples?a.kills/airSamples:null,
@@ -179,7 +166,7 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     {id:'air_superiority',title:'空优立功榜',subtitle:'空战挂载有战果，减刑凭据在手。',key:'avg_air_superiority_kills',label:'场均空优机击杀数',samples:'air_superiority_matches',sample_label:'有效挂载详情',direction:'desc',format:'decimal2',icon:'plane'},
   ];
   const charges=definitions.map(d=>({...d,group:['transport','heavy_aa_kills','air_superiority'].includes(d.id)?'mitigation':'sentencing',rows:ranking(d.key,d.samples,d.direction)}));
-  return { min_games:min,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges,air_superiority_model:air.model };
+  return { min_games:min,self_destruction_model:selfModel.version,members,eligible:eligible.length,hungry:charges[0].rows,transport:charges[1].rows,charges,air_superiority_model:air.model };
 }
 
 export function listMatches(store, params, candidates = false) {
@@ -229,6 +216,6 @@ export function unitStats(store, params) {
   const f = filters(params);
   const extra = /^\d+$/.test(params.get('unit_member') ?? '') ? ' AND r.member_id=?' : '';
   const args = [...f.args, ...(extra ? [Number(params.get('unit_member'))] : [])];
-  return store.all(`SELECT u.unit_id,COUNT(*) AS instances,COUNT(DISTINCT u.match_id) AS matches,SUM(u.kills) AS kills,SUM(u.damage) AS damage,SUM(u.damage_received) AS damage_received,SUM(u.supply) AS supply,SUM(u.refunded) AS refunded,SUM(CASE WHEN u.refunded=0 AND (u.death_time>0 OR json_type(u.raw_json,'$.SelfDestruction')='true') THEN 1 ELSE 0 END) AS deaths,c.data_json AS catalogue_json
+  return store.all(`SELECT u.unit_id,COUNT(*) AS instances,COUNT(DISTINCT u.match_id) AS matches,SUM(u.kills) AS kills,SUM(u.damage) AS damage,SUM(u.damage_received) AS damage_received,SUM(u.supply) AS supply,SUM(u.refunded) AS refunded,SUM(CASE WHEN u.refunded=0 AND (u.death_time>0 OR ${SELF_CONFIRMED_SQL}) THEN 1 ELSE 0 END) AS deaths,c.data_json AS catalogue_json
     FROM unit_instances u JOIN registered_participants r ON r.match_id=u.match_id AND r.player_id=u.player_id JOIN matches m ON m.id=u.match_id LEFT JOIN unit_catalogue c ON c.unit_id=u.unit_id WHERE ${f.sql}${extra} GROUP BY u.unit_id ORDER BY damage DESC LIMIT 300`, ...args).map((u) => ({ ...u, catalogue: displayUnit(display,u.unit_id,u.catalogue_json ? JSON.parse(u.catalogue_json) : null), catalogue_json: undefined }));
 }

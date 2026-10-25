@@ -5,7 +5,7 @@ const numeric=n=>known(n)?n:null;
 const stat=n=>known(n)&&n>=0?n:null;
 export function unitFate(u){
   if(u.refunded===1||u.refunded===true||u.raw?.WasRefunded===true)return 'refunded';
-  if(u.raw?.SelfDestruction===true)return 'self-destroyed';
+  if(u.raw?.SelfDestruction===true||(!Object.hasOwn(u.raw??{},'SelfDestruction')&&u.raw?.TotalSelfDamageDealt===-1&&!(known(u.death_time)&&u.death_time>0)))return 'self-destroyed';
   return known(u.death_time)&&u.death_time>0?'dead':'unknown';
 }
 export function unitStatusLabel(u){
