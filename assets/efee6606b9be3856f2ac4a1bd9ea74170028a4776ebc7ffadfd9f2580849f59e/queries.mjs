@@ -70,6 +70,7 @@ export function memberStats(store, params = new URLSearchParams()) {
     SUM(destruction) AS destruction,SUM(losses) AS losses,SUM(rating_delta) AS rating_delta,SUM(objectives) AS objectives,
     AVG(destruction) AS avg_destruction,COUNT(destruction) AS destruction_matches,
     AVG(losses) AS avg_losses,COUNT(losses) AS losses_matches,
+    SUM(destruction IS NOT NULL AND losses IS NOT NULL) AS score_ratio_matches,
     AVG(objectives) AS avg_objectives,COUNT(objectives) AS objectives_matches,
     AVG(rating_delta) AS avg_rating_delta,COUNT(rating_delta) AS rating_matches,
     COUNT(friendly_fire) AS friendly_fire_matches,COUNT(damage) AS detail_matches,COUNT(supply_consumed) AS supply_matches,
@@ -134,7 +135,9 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
     const total=samples?units.reduce((sum,u)=>sum+u.kills,0):null;
     const a=air.members.get(m.member_id),airSamples=a?.matches??0;
     const self=selfDestruction.get(m.member_id),selfSamples=self?.samples??0;
-    return {...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,win_rate:m.decided?m.wins/m.decided:null,
+    return {...m,unit_kd:m.units_lost>0?m.kills/m.units_lost:m.kills>0?'Infinity':null,
+      score_ratio:m.destruction===null||m.losses===null?null:m.losses>0?m.destruction/m.losses:m.destruction>0?'Infinity':null,
+      win_rate:m.decided?m.wins/m.decided:null,
       self_destructions:self?.total??null,avg_self_destructions:selfSamples?self.ranked/selfSamples:null,
       self_destructions_ranked:self?.ranked??0,self_destruction_compatible:self?.compatible??0,
       self_destruction_score:self?.score??0,self_destruction_score_ranked:self?.ranked_score??0,
@@ -159,7 +162,7 @@ export function supplyAnalysis(store, params = new URLSearchParams()) {
   const definitions=[
     {id:'hungry',title:'小馋猫罪',subtitle:'补给车一响，饭点准时到。',key:'avg_received_allies',label:'场均消耗队友补给',samples:'supply_matches',sample_label:'补给详情',direction:'desc',format:'number',icon:'utensils'},
     {id:'transport',title:'运输大队长',subtitle:'补给送到位，减刑有机会。',key:'avg_supplied_allies',label:'场均补给队友',samples:'supply_matches',sample_label:'补给详情',direction:'desc',format:'number',icon:'truck'},
-    {id:'kd',title:'KD失职罪',subtitle:'出门气势如虹，交换略显沉重。',key:'unit_kd',label:'单位 K/D',samples:'detail_matches',sample_label:'完整详情',direction:'asc',format:'ratio',icon:'arrow-right-left'},
+    {id:'kd',title:'KD失职罪',subtitle:'出门气势如虹，交换略显沉重。',key:'score_ratio',label:'分数交换比',samples:'score_ratio_matches',sample_label:'分数记录',direction:'asc',format:'ratio',icon:'arrow-right-left'},
     {id:'kills',title:'击杀摸鱼罪',subtitle:'枪声很热闹，战果很安静。',key:'avg_destruction',label:'场均击杀分',samples:'destruction_matches',sample_label:'击杀分记录',direction:'asc',format:'number',icon:'crosshair'},
     {id:'losses',title:'白给浪费罪',subtitle:'装备刚出厂，对面就到账。',key:'avg_losses',label:'场均损失分',samples:'losses_matches',sample_label:'损失分记录',direction:'desc',format:'number',icon:'flame'},
     {id:'self_destruction',title:'自毁长城罪',subtitle:'敌军尚未邀功，自家先办送别。',key:'avg_self_destruction_score',label:'场均自毁损失分',samples:'self_destruction_score_samples',sample_label:'有效计分对局',direction:'desc',format:'decimal2',icon:'bomb'},

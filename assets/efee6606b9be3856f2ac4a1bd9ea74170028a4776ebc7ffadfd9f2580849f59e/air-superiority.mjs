@@ -135,8 +135,15 @@ export async function updateAirCatalogue(store,source,{force=false,allowed=()=>t
   let needed=ids.filter(id=>refresh||!model.units[id]);
   if(!needed.length||!allowed())return {updated:0,total:Object.keys(model.units).length};
   if(!force&&model.last_error_at&&Date.now()-Date.parse(model.last_error_at)<3600000)return {updated:0,total:Object.keys(model.units).length};
-  const version=await source.read('/api/dek/db-version');
-  if(typeof version.dbFileName!=='string'||!version.dbFileName)throw new Error('飞机目录版本信息缺失');
+  let version;
+  try{
+    version=await source.read('/api/dek/db-version',{force});
+    if(typeof version.dbFileName!=='string'||!version.dbFileName)throw new Error('飞机目录版本信息缺失');
+  }catch(error){
+    model.last_error_at=new Date().toISOString();
+    store.run("INSERT INTO analysis_catalogue(key,data_json,updated_at) VALUES('air_superiority_model',?,?) ON CONFLICT(key) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at",JSON.stringify(model),new Date().toISOString());
+    throw error;
+  }
   if(model.db_file&&model.db_file!==version.dbFileName){model={version:AIR_MODEL_VERSION,units:{},...(model.catalogues?{catalogues:model.catalogues}:{})};needed=ids;}
   model={...model,db_file:version.dbFileName,version_id:version.versionId??null,last_attempt:new Date().toISOString()};
   let updated=0;
@@ -144,7 +151,7 @@ export async function updateAirCatalogue(store,source,{force=false,allowed=()=>t
     for(const id of needed){
       if(!allowed())break;
       const query=new URLSearchParams({unitid:id,db_file:version.dbFileName});
-      const data=await source.read('/api/units/full?'+query);
+      const data=await source.read('/api/units/full?'+query,{force});
       if(String(data.unit?.id)!==id)throw new Error('飞机完整目录 ID 不匹配');
       model.units[id]=compileAirUnit(data.unit);updated++;
       onProgress({unit_id:id,name:model.units[id].name,updated,total:needed.length});
