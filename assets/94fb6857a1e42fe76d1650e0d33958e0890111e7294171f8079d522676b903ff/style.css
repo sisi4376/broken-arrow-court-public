@@ -131,6 +131,7 @@ button.match-unit-card:hover{background:#1e2520;border-color:var(--green)}
 .match-player-raw{margin-top:18px;font-size:11px;min-width:0}
 .friend-match-view .filters select[data-filter="team"]{display:none}
 .match-player-raw>summary{cursor:pointer;color:var(--muted);padding:8px 0}
+.request-daily-table{max-height:360px;overflow:auto}
 .match-player-modal .table-wrap table{min-width:720px}
 @media(max-width:760px){
   .match-player-units .section-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px}
