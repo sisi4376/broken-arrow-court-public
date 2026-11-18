@@ -282,4 +282,3 @@ export function createMatchPlayers({S,esc,icon,fmt,ratio,delta,badge,modal,jsonT
   }
   return {view,unitView,typeView,highlights,open,install};
 }
-

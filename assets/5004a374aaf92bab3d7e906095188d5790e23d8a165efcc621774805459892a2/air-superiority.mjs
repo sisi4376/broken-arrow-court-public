@@ -165,4 +165,3 @@ export async function updateAirCatalogue(store,source,{force=false,allowed=()=>t
   }
   return {updated,total:Object.keys(model.units).length};
 }
-

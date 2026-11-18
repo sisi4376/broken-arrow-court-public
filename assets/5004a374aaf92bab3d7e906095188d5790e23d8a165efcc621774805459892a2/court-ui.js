@@ -20,19 +20,18 @@ export const COURT_COPY = Object.freeze({
 });
 const escapePattern = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const pattern = new RegExp(Object.keys(COURT_COPY).sort((a,b)=>b.length-a.length).map(escapePattern).join('|'), 'g');
-let enabled = false;
-export const isCourtMode = () => enabled;
-export function setCourtMode(value) {
-  const changed = enabled !== (value === true);
-  enabled = value === true;
+export const isCourtMode = () => true;
+// Keep the initializer compatible with older snapshots; the court UI is permanent.
+export function setCourtMode() {
+  const changed = typeof document !== 'undefined' && document.documentElement.dataset.courtMode !== 'on';
   if (typeof document !== 'undefined') {
-    document.documentElement.dataset.courtMode = enabled ? 'on' : 'off';
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', enabled ? '#30201d' : '#151716');
+    document.documentElement.dataset.courtMode = 'on';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#30201d');
   }
   return changed;
 }
 export function courtText(text) {
-  return enabled && typeof text === 'string' ? text.replace(pattern, key => COURT_COPY[key]) : text;
+  return typeof text === 'string' ? text.replace(pattern, key => COURT_COPY[key]) : text;
 }
 // Translate authored template segments, never interpolated player/source data.
 export function courtHtml(strings, ...values) {

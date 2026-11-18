@@ -95,10 +95,10 @@ export function createReader(base, { fetcher = fetch, sqlite, cacheStorage = glo
       state.users++;
       try {
         const url = new URL(route, 'https://court.invalid'), path = url.pathname;
-        if (path === '/api/session') return { user: { name: '公开只读', role: 'viewer', member_id: 0 }, setup_required: false, ui: { court_mode: snapshot.ui?.court_mode === true } };
+        if (path === '/api/session') return { user: { name: '公开只读', role: 'viewer', member_id: 0 }, setup_required: false, ui: { court_mode: true } };
         if (path === '/api/members') return { members: structuredClone(snapshot.members) };
         if (path === '/api/maps') return { maps: snapshot.maps, modes: snapshot.modes };
-        if (path === '/api/sync/status') return { active: null, settings: { sync_enabled: false, court_mode: snapshot.ui?.court_mode === true }, snapshot };
+        if (path === '/api/sync/status') return { active: null, settings: { sync_enabled: false, court_mode: true }, snapshot };
         const asset = snapshot.responses?.[requestKey(route)];
         if (asset) return await json(asset, state);
         const match = path.match(/^\/api\/matches\/([1-9]\d*)$/);
